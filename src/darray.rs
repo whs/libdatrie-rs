@@ -125,7 +125,7 @@ impl DArray {
             let start_c = (cur - base) as TrieIndex;
             let max_c = (TrieChar::MAX as TrieIndex).min(self.cell.len() as i32 - base);
 
-            for c in (start_c+1)..=max_c {
+            for c in (start_c + 1)..=max_c {
                 if self.get_check(base + c) == Some(parent) {
                     keybuff.push(c as TrieChar);
                     return self.first_separate(base + c, keybuff);

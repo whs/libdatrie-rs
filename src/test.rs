@@ -9,7 +9,7 @@ mod test {
 
         if !path.exists() {
             println!("Skipping test as {:?} is missing", path);
-            return
+            return;
         }
 
         let ctrie = cdatrie::Trie::from_file(path.as_os_str()).unwrap();
