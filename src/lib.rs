@@ -20,7 +20,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 /// datrie implement a read-only libdatrie compatible data structure
 use std::io;
-use std::io::{BufReader, Read, Seek};
+use std::io::{BufReader, Read};
 
 use alphamap::AlphaMap;
 use darray::DArray;
@@ -58,14 +58,14 @@ impl Trie {
         Self::from_reader(&mut buf)
     }
 
-    pub fn from_reader<T: Read + Seek>(reader: &mut T) -> io::Result<Self> {
+    pub fn from_reader<T: Read>(reader: &mut T) -> io::Result<Self> {
         let mut out = Self::default();
         out.load(reader)?;
 
         Ok(out)
     }
 
-    pub fn load<T: Read + Seek>(&mut self, reader: &mut T) -> io::Result<()> {
+    pub fn load<T: Read>(&mut self, reader: &mut T) -> io::Result<()> {
         self.alpha_map.load(reader)?;
         self.darray.load(reader)?;
         self.tail.load(reader)?;
