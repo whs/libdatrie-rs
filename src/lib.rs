@@ -53,7 +53,7 @@ impl Trie {
     }
 
     pub fn from_file(path: &OsStr) -> io::Result<Self> {
-        let mut fp = File::open(path)?;
+        let fp = File::open(path)?;
         let mut buf = BufReader::new(fp);
         Self::from_reader(&mut buf)
     }
