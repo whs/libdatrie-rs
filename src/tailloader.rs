@@ -54,8 +54,8 @@ impl<'a, T: Read> TailLoader<'a, T> {
             v => Some(v),
         };
         let data = match self.reader.read_i32::<BigEndian>()? {
-            -1 => None,
-            v => Some(v),
+            -1 => panic!("item has no value"), // FIXME
+            v => v,
         };
         let length = self.reader.read_i16::<BigEndian>()?.max(0) as usize;
 

@@ -16,25 +16,37 @@
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ////////////////////////////////////////////////////////////////////////////////
 
-pub use alphamap::AlphaMap;
-pub use trie::{StoreError, Trie, TrieIter, TrieState};
+use crate::trie::Trie;
+use std::path::PathBuf;
 
-mod alphamap;
-mod alphamaploader;
-#[cfg(feature = "cffi")]
-mod cffi;
-mod darray;
-mod darrayloader;
-mod tail;
-mod tailloader;
-#[cfg(all(test, not(feature = "cffi")))]
-mod test_cdatrie;
-#[cfg(test)]
-mod test_utils;
-mod trie;
+#[test]
+fn load_libthai() {
+    let path = PathBuf::from("/usr/share/libthai/thbrk.tri");
 
-/// AlphaChar is the alphabet character used in words of a target language
-pub type AlphaChar = u32;
-pub type TrieIndex = i32;
-pub type TrieChar = u8;
-pub type TrieData = i32;
+    if !path.exists() {
+        println!("Skipping test as {:?} is missing", path);
+        return;
+    }
+
+    let ctrie = cdatrie::Trie::from_file(path.as_os_str()).unwrap();
+    let item_count = ctrie.iter().count();
+    assert!(item_count > 0);
+
+    let trie = Trie::from_file(path.as_os_str()).unwrap();
+
+    let trie_iter = trie.iter();
+    let ctrie_iter = ctrie.iter();
+
+    let mut loaded = 0;
+
+    for (trie_item, ctrie_item) in trie_iter.zip(ctrie_iter) {
+        assert_eq!(
+            trie_item, ctrie_item,
+            "fail on iteration #{} - {:?} != cdatrie {:?}",
+            loaded, trie_item, ctrie_item
+        );
+        loaded += 1;
+    }
+
+    assert_eq!(loaded, ctrie.iter().count());
+}

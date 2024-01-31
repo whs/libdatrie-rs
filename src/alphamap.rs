@@ -45,7 +45,7 @@ use std::io::{Read, Write};
 
 pub(super) const ALPHAMAP_SIGNATURE: u32 = 0xD9FCD9FC;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AlphaMap {
     set: RangeSet<AlphaChar>,
 
@@ -92,7 +92,7 @@ impl AlphaMap {
         }
     }
 
-    pub fn to_trie(&self, ch: AlphaChar) -> Option<TrieChar> {
+    pub fn char_to_trie(&self, ch: AlphaChar) -> Option<TrieChar> {
         if ch < self.min {
             return None;
         }
@@ -102,6 +102,28 @@ impl AlphaMap {
             Some(v) => *v,
             None => None,
         }
+    }
+
+    pub fn to_trie_str(&self, str: &[AlphaChar]) -> Option<Vec<TrieChar>> {
+        let mut error = false;
+        // TOOD try_collect: rust#94047
+        let out = str
+            .iter()
+            .copied()
+            .map_while(|ch| {
+                let trie_ch = self.char_to_trie(ch);
+                if trie_ch.is_none() {
+                    error = true;
+                }
+                trie_ch
+            })
+            .collect();
+
+        if error {
+            return None;
+        }
+
+        Some(out)
     }
 
     pub fn to_alpha(&self, ch: TrieChar) -> Option<AlphaChar> {
@@ -116,7 +138,7 @@ impl AlphaMap {
         &'a self,
         ch: T,
     ) -> impl Iterator<Item = Option<TrieChar>> + 'a {
-        ch.map(|v| self.to_trie(v))
+        ch.map(|v| self.char_to_trie(v))
     }
 
     /// Map input AlphaChar iterator to TrieChar, dropping invalid characters
@@ -124,7 +146,7 @@ impl AlphaMap {
         &'a self,
         ch: T,
     ) -> impl Iterator<Item = TrieChar> + 'a {
-        ch.map(|v| self.to_trie(v)).filter_map(|v| v)
+        ch.map(|v| self.char_to_trie(v)).filter_map(|v| v)
     }
 
     pub fn to_alphas<'a, T: 'a + Iterator<Item = TrieChar>>(
@@ -183,14 +205,14 @@ mod tests {
         map.add_range(10, 20);
         map.add_range(100, 110);
 
-        assert_eq!(map.to_trie(0), None);
-        assert_eq!(map.to_trie(10), Some(1));
-        assert_eq!(map.to_trie(20), Some(11));
-        assert_eq!(map.to_trie(21), None);
-        assert_eq!(map.to_trie(100), Some(12));
-        assert_eq!(map.to_trie(110), Some(22));
-        assert_eq!(map.to_trie(111), None);
-        assert_eq!(map.to_trie(10000), None);
+        assert_eq!(map.char_to_trie(0), None);
+        assert_eq!(map.char_to_trie(10), Some(1));
+        assert_eq!(map.char_to_trie(20), Some(11));
+        assert_eq!(map.char_to_trie(21), None);
+        assert_eq!(map.char_to_trie(100), Some(12));
+        assert_eq!(map.char_to_trie(110), Some(22));
+        assert_eq!(map.char_to_trie(111), None);
+        assert_eq!(map.char_to_trie(10000), None);
     }
 
     #[test]

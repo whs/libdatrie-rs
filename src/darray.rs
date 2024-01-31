@@ -30,7 +30,7 @@ pub struct Cell {
     pub check: TrieIndex,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct DArray {
     cell: Vec<Cell>,
 }
@@ -66,8 +66,30 @@ impl DArray {
         }
     }
 
+    /// Walk the double-array trie from state index
+    /// If there exists an edge from index with arc labeled input_char, this function
+    /// returns the new state. Otherwise, it returns None
+    #[must_use]
+    pub fn walk(&self, index: TrieIndex, input_char: TrieChar) -> Option<TrieIndex> {
+        let next = self.get_base(index)? + input_char as i32;
+        if self.get_check(next) == Some(index) {
+            return Some(next);
+        }
+        None
+    }
+
     #[inline]
-    pub(crate) fn is_separate(&self, s: TrieIndex) -> bool {
+    pub fn is_walkable(&self, state: TrieIndex, input_char: TrieChar) -> Option<bool> {
+        // da_get_check (
+        //      (d),
+        //      da_get_base(d, s) + c
+        // ) == (s)
+        let base = self.get_base(state)? + input_char as i32;
+        Some(self.get_check(base) == Some(state))
+    }
+
+    #[inline]
+    pub fn is_separate(&self, s: TrieIndex) -> bool {
         match self.get_base(s) {
             Some(v) => v < 0,
             None => false,
@@ -75,7 +97,7 @@ impl DArray {
     }
 
     #[inline]
-    pub(crate) fn get_tail_index(&self, s: TrieIndex) -> Option<TrieIndex> {
+    pub fn get_tail_index(&self, s: TrieIndex) -> Option<TrieIndex> {
         Some(-self.get_base(s)?)
     }
 
@@ -84,22 +106,13 @@ impl DArray {
         self.set_base(s, -v)
     }
 
-    /**
-     * @brief Find first separate node in a sub-trie
-     *
-     * @param d       : the double-array structure
-     * @param root    : the sub-trie root to search from
-     *
-     * @return index to the first separate node; TRIE_INDEX_ERROR on any failure
-     *
-     * Find the first separate node under a sub-trie rooted at @a root.
-     *
-     * On return, @a keybuff is appended with the key characters which walk from
-     * @a root to the separate node. This is for incrementally calculating the
-     * transition key, which is more efficient than later totally reconstructing
-     * key from the given separate node.
-     *
-     */
+    /// Find first separate node in a sub-trie
+    ///
+    /// Find the first separate node under a sub-trie rooted at root.
+    /// On return, keybuff is appended with the key characters which walk from
+    /// root to the separate node. This is for incrementally calculating the
+    /// transition key, which is more efficient than later totally reconstructing
+    /// key from the given separate node.
     pub fn first_separate(
         &self,
         root: TrieIndex,

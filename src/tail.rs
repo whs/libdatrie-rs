@@ -25,7 +25,7 @@ use std::io::{Read, Write};
 pub(super) const TAIL_SIGNATURE: u32 = 0xDFFCDFFC;
 const TAIL_START_BLOCKNO: TrieIndex = 1;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Tail {
     first_free: i32,
     tails: Vec<TailData>,
@@ -54,13 +54,7 @@ impl Tail {
                 Some(v) => v,
             };
             writer.write_i32::<BigEndian>(next_free)?;
-
-            let data: i32 = match tail.data {
-                None => -1,
-                Some(v) => v,
-            };
-            writer.write_i32::<BigEndian>(data)?;
-
+            writer.write_i32::<BigEndian>(tail.data)?;
             writer.write_i16::<BigEndian>(tail.suffix.len() as i16)?;
             writer.write(&tail.suffix)?;
         }
@@ -82,20 +76,32 @@ impl Tail {
 
     pub fn get_data(&self, index: TrieIndex) -> Option<TrieData> {
         let idx = index - TAIL_START_BLOCKNO;
-        Some(self.tails.get(idx as usize)?.data).flatten()
+        Some(self.tails.get(idx as usize)?.data)
     }
 
-    pub fn set_data(&mut self, index: TrieIndex, data: Option<TrieData>) -> Result<(), ()> {
+    pub fn set_data(&mut self, index: TrieIndex, data: TrieData) -> Result<(), ()> {
         let idx = index - TAIL_START_BLOCKNO;
         let mut item = self.tails.get_mut(idx as usize).ok_or(())?;
         item.data = data;
         Ok(())
+    }
+
+    pub fn walk_char(&self, index: TrieIndex, suffix_idx: usize, char: TrieChar) -> bool {
+        let suffix = match self.get_suffix(index) {
+            Some(v) => v,
+            None => return false,
+        };
+        let suffix_char = suffix.get(suffix_idx).copied();
+        if suffix_char == Some(char) {
+            return true;
+        }
+        false
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct TailData {
     pub(super) next_free: Option<TrieIndex>,
-    pub(super) data: Option<TrieData>,
+    pub(super) data: TrieData,
     pub(super) suffix: Vec<TrieChar>,
 }
