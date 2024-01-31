@@ -3,17 +3,15 @@ use crate::AlphaChar;
 /// Alphabet string length
 #[no_mangle]
 pub extern "C" fn alpha_char_strlen(key: *const AlphaChar) -> i32 {
-    let mut out = 0;
     let mut pos = key;
 
     unsafe {
         while *pos != 0 {
-            out += 1;
             pos = pos.offset(1);
         }
-    }
 
-    out
+        pos.offset_from(key) as i32
+    }
 }
 
 /// Compare alphabet strings
@@ -29,7 +27,7 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
     let mut str2pos = str2;
 
     unsafe {
-        while *str1pos == *str2pos {
+        while *str1pos != 0 && *str1pos == *str2pos {
             str1pos = str1pos.offset(1);
             str2pos = str2pos.offset(1);
         }
@@ -44,7 +42,7 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
 
 #[cfg(test)]
 mod test {
-    use crate::cffi::alphachar::alpha_char_strlen;
+    use crate::cffi::alphachar::*;
     use crate::AlphaChar;
 
     #[test]
@@ -57,5 +55,14 @@ mod test {
     fn test_alpha_char_strlen_empty() {
         let ch: [AlphaChar; 1] = [0];
         assert_eq!(alpha_char_strlen(ch.as_ptr()), 0);
+    }
+
+    #[test]
+    fn test_alpha_char_strcmp() {
+        let ch1: [AlphaChar; 3] = [1, 1, 0];
+        let ch2: [AlphaChar; 3] = [1, 2, 0];
+        assert_eq!(alpha_char_strcmp(ch1.as_ptr(), ch1.as_ptr()), 0);
+        assert_eq!(alpha_char_strcmp(ch1.as_ptr(), ch2.as_ptr()), -1);
+        assert_eq!(alpha_char_strcmp(ch2.as_ptr(), ch1.as_ptr()), 1);
     }
 }

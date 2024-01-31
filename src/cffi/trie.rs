@@ -18,9 +18,11 @@ pub const TRIE_DATA_ERROR: TrieData = -1;
 /// [trie_delete] respectively.
 ///
 /// The created object must be freed with [trie_free].
-extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
+#[no_mangle]
+extern "C" fn trie_new(alpha_map: &AlphaMap) -> *mut Trie {
     // Trie *  trie_new (const AlphaMap *alpha_map);
-    todo!()
+    let trie = Trie::new(alpha_map.clone());
+    Box::into_raw(Box::new(trie))
 }
 
 /// Create a new trie by loading from a file
