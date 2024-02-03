@@ -38,7 +38,7 @@ The FFI is intended to be a drop in replacement for original libdatrie, except f
 | trie_state_is_single      | ✅️              |
 | trie_state_get_data       | ✅️              |
 | trie_store_if_absent      | ✅️              |
-| trie_fread                | 💣️ (Unix only) |
+| trie_fread                | ✅️ (Unix only) |
 | trie_fwrite               | ✖️              |
 | trie_state_walkable_chars | 💣️             |
 | trie_iterator_new         | 💣️             |

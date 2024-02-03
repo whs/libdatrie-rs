@@ -110,8 +110,8 @@ impl Trie {
                 None => return None,
             };
             match self.tail.walk_char(state, suffix_idx, tc) {
-                true => suffix_idx += 1,
-                false => return None,
+                Some(v) => suffix_idx = v,
+                None => return None,
             }
         }
 
@@ -134,13 +134,13 @@ impl Trie {
     ) -> Result<(), StoreError> {
         // walk through branches
         let mut state = self.darray.get_root();
-        let mut sep = 0;
-        for p in 0..key.len() {
+        let mut key_iter = key.iter().copied().enumerate();
+        while let Some((p, ch)) = key_iter.next() {
             if self.darray.is_separate(state) {
                 break;
             }
 
-            let tc = match self.alpha_map.char_to_trie(key[p]) {
+            let tc = match self.alpha_map.char_to_trie(ch) {
                 Some(v) => v,
                 None => return Err(StoreError::KeyOutOfRange),
             };
@@ -150,29 +150,40 @@ impl Trie {
                     state = new_state;
                 }
                 None => {
-                    let key_str = match self.alpha_map.to_trie_str(&key[p..key.len()]) {
+                    let key_str = match self.alpha_map.to_trie_str(&key[p..]) {
                         Some(v) => v,
                         None => return Err(StoreError::KeyOutOfRange),
                     };
                     return self.branch_in_branch(state, &key_str, data);
                 }
             }
-
-            sep = p;
         }
 
         // walk through tail
         let mut t = match self.darray.get_tail_index(state) {
             Some(v) => v,
-            None => return Err(StoreError::NotExists), // XXX: Is this behavior match the original code?
+            None => return Err(StoreError::NotExists), // I think the original code expect this to not fail?
         };
         let mut suffix_idx = 0;
-        for p in sep..key.len() {
+        while let Some((p, ch)) = key_iter.next() {
             let tc = match self.alpha_map.char_to_trie(key[p]) {
                 Some(v) => v,
                 None => return Err(StoreError::KeyOutOfRange),
             };
-            todo!()
+            /*if (!tail_walk_char (trie->tail, t, &suffix_idx, (TrieChar) tc)) {
+                TrieChar *tail_str;
+                Bool      res;
+
+                tail_str = alpha_map_char_to_trie_str (trie->alpha_map, sep);
+                if (!tail_str)
+                    return FALSE;
+                res = trie_branch_in_tail (trie, s, tail_str, data);
+                free (tail_str);
+
+                return res;
+            }*/
+
+            todo!();
         }
 
         if !overwrite {
@@ -189,13 +200,19 @@ impl Trie {
     }
 
     fn branch_in_branch(
-        &self,
+        &mut self,
         sep_node: TrieIndex,
         suffix: &[TrieChar],
         data: TrieData,
     ) -> Result<(), StoreError> {
-        todo!()
-        // let new_da = self.darray.insert_branch(sep_node, suffix[0]);
+        let new_da = self.darray.insert_branch(sep_node, suffix[0]).ok_or(StoreError::Overflow)?;
+
+        let new_tail = self.tail.add_suffix(&suffix[1..suffix.len()]);
+        self.tail.set_data(new_tail, data).unwrap();
+        self.darray.set_tail_index(new_da, new_tail);
+
+        self.is_dirty = true;
+        Ok(())
     }
 }
 
@@ -207,6 +224,8 @@ pub enum StoreError {
     KeyOutOfRange,
     /// The key is a duplicate. Only returned from [Trie.store_if_absent]
     Duplicate,
+    /// Trie is full
+    Overflow
 }
 
 #[derive(Clone, Debug)]

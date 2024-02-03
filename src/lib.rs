@@ -25,6 +25,7 @@ mod alphamaploader;
 mod cffi;
 mod darray;
 mod darrayloader;
+mod symbols;
 mod tail;
 mod tailloader;
 #[cfg(all(test, not(feature = "cffi")))]

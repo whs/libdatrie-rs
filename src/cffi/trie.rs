@@ -5,6 +5,9 @@ use crate::{AlphaChar, TrieData};
 use core::slice;
 use std::ffi::{c_char, CStr, OsStr};
 use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
+use std::mem::ManuallyDrop;
+use std::ops::DerefMut;
 use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::ptr::null_mut;
@@ -54,14 +57,21 @@ extern "C" fn trie_new_from_file(path: *const c_char) -> *mut Trie {
 #[cfg(unix)] // TODO: Support windows
 extern "C" fn trie_fread(fd: *mut libc::FILE) -> *mut Trie {
     // Trie *  trie_fread (FILE *file);
-    let mut file = unsafe { File::from_raw_fd(libc::fileno(fd)) };
-    // FIXME: when file is dropped it is closed. we should not close unowned fd
-    // Forcing no drop is not correct either as file may have internal buffers
-    // that needs to be freed
-    let trie = match Trie::from_reader(&mut file) {
+    // We don't actually own the file, so force it to not run File destructor
+    let mut file = ManuallyDrop::new(unsafe { File::from_raw_fd(libc::fileno(fd)) });
+    let mut buf = BufReader::new(file.deref_mut());
+    let trie = match Trie::from_reader(&mut buf) {
         Ok(v) => v,
-        Err(_) => return null_mut(),
+        Err(_) => {
+            // The file position is undefined behavior at this point
+            return null_mut();
+        }
     };
+
+    let position = buf.stream_position().unwrap();
+    // The documented functionality says that after this function return the pointer is left at the end of trie data
+    // BufReader might have advanced the file past that point
+    buf.seek(SeekFrom::Start(position)).unwrap();
 
     Box::into_raw(Box::new(trie))
 }
