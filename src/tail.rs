@@ -147,7 +147,7 @@ impl Tail {
         };
         let suffix_char = suffix.get(suffix_idx).copied();
         if suffix_char == Some(char) {
-            return Some(min(suffix_idx + 1, suffix.len()));
+            return Some(min(suffix_idx + 1, suffix.len() - 1));
         }
         None
     }

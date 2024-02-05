@@ -52,7 +52,7 @@ impl DArray {
                 check: -1,
             },
             // Root node
-            Cell { base: 2, check: 0 },
+            Cell { base: Self::POOL_BEGIN, check: 0 },
         ];
 
         DArray { cell }
@@ -273,10 +273,10 @@ impl DArray {
         }
 
         let new_begin = self.cell.len() as TrieIndex;
-        let additional = to_index - self.cell.len() as TrieIndex;
+        let additional = to_index + 1 - self.cell.len() as TrieIndex;
         self.cell.reserve_exact(additional as usize);
 
-        for i in new_begin..to_index {
+        for i in new_begin..=to_index {
             self.cell.push(Cell {
                 check: -(i + 1),
                 base: -(i - 1), // old code is set_base(i+1, -i)
@@ -316,11 +316,11 @@ impl DArray {
     }
 
     fn alloc_cell(&mut self, index: TrieIndex) {
-        let prev = self.get_base(index).unwrap_or(0);
-        let next = self.get_check(index).unwrap_or(0);
+        let prev = -self.get_base(index).unwrap_or(0);
+        let next = -self.get_check(index).unwrap_or(0);
 
-        self.set_check(prev, next);
-        self.set_base(next, prev);
+        self.set_check(prev, -next);
+        self.set_base(next, -prev);
     }
 
     fn free_cell(&mut self, cell: TrieIndex) {
