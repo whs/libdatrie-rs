@@ -1,53 +1,43 @@
 use crate::TrieChar;
 use std::slice::Iter;
+use arrayvec::ArrayVec;
 
 #[derive(Debug)]
 pub(crate) struct Symbols {
-    num: usize,
-    symbols: [TrieChar; TrieChar::MAX as usize],
+    symbols: ArrayVec<TrieChar, { TrieChar::MAX as usize }>,
 }
 
 impl Symbols {
     pub(crate) fn new() -> Symbols {
         Symbols {
-            num: 0,
-            symbols: [0; TrieChar::MAX as usize],
+            symbols: ArrayVec::new(),
         }
     }
 
     pub(crate) fn add_fast(&mut self, ch: TrieChar) {
-        let index = self.num;
-        self.num += 1;
-        self.symbols[index] = ch;
+        self.symbols.push(ch);
     }
 
     pub(crate) fn add(&mut self, ch: TrieChar) {
-        let insertion_point = self.symbols[0..self.num].partition_point(|no| *no < ch);
+        let insertion_point = self.symbols.partition_point(|no| *no < ch);
 
-        if self.symbols[insertion_point] == ch {
+        if self.symbols.get(insertion_point).copied() == Some(ch) {
             return;
         }
 
-        let end = self.symbols.len() - 1;
-        self.symbols
-            .copy_within(insertion_point..end, insertion_point + 1);
-        self.symbols[insertion_point] = ch;
-        self.num += 1;
+        self.symbols.insert(insertion_point, ch);
     }
 
     pub(crate) fn num(&self) -> usize {
-        self.num
+        self.symbols.len()
     }
 
     pub(crate) fn get(&self, index: usize) -> Option<TrieChar> {
-        if index >= self.num {
-            return None;
-        }
         self.symbols.get(index).copied()
     }
 
     pub(crate) fn iter(&self) -> Iter<'_, TrieChar> {
-        self.symbols[0..self.num].iter()
+        self.symbols.iter()
     }
 }
 

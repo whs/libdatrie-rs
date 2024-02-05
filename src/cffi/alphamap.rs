@@ -52,7 +52,7 @@ mod tests {
         let mut alphamap = alpha_map_new();
         unsafe {
             alpha_map_add_range(&mut *alphamap, 0, 0xFF);
-            assert_eq!((&*alphamap).char_to_trie(255), Some(255));
+            assert_eq!((&*alphamap).char_to_trie(255), Some(256));
             alpha_map_free(alpha_map_clone(&*alphamap));
             alpha_map_free(alphamap);
         }

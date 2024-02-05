@@ -15,6 +15,7 @@ cffi = ["dep:libc"]
 [dependencies]
 byteorder = "1"
 range-map = "0.2"
+arrayvec = "0.7.4"
 libc = {version = "0.2.152", optional = true}
 
 [dev-dependencies]
