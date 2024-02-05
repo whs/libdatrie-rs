@@ -1,7 +1,9 @@
+use std::mem::size_of;
 use crate::cffi::trie::TRIE_DATA_ERROR;
 use crate::trie::{TrieIter, TrieState};
 use crate::{AlphaChar, TrieData};
 use std::ptr::null_mut;
+use std::slice;
 
 /// Create a new trie iterator for iterating entries of a sub-trie rooted at state
 ///
@@ -39,9 +41,16 @@ extern "C" fn trie_iterator_next(iter: &mut TrieIter) -> bool {
 extern "C" fn trie_iterator_get_key(iter: &mut TrieIter) -> *mut AlphaChar {
     // AlphaChar *     trie_iterator_get_key (const TrieIterator *iter);
     match iter.get_key() {
-        // TODO: This is incorrect - it may have too short lifetime or leak
-        // TODO: This must be freeable with libc::free()
-        Some(mut key) => key.as_mut_ptr(),
+        Some(mut key) => unsafe {
+            // Clone to libc-owned memory with null byte
+            let len = key.len() + 1;
+            let key_c = libc::malloc(len * size_of::<AlphaChar>()) as *mut AlphaChar;
+            let key_slice = slice::from_raw_parts_mut(key_c, len);
+            key_slice[..key.len()].copy_from_slice(&key);
+            // Make sure to null terminate
+            key_slice[key.len()] = 0;
+            key_c
+        },
         None => null_mut(),
     }
 }

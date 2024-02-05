@@ -24,7 +24,7 @@ The FFI is intended to be a drop in replacement for original libdatrie, except f
 | trie_free                 | ✅️              |
 | trie_save                 | ✖️              |
 | trie_is_dirty             | ✅️              |
-| trie_retrieve             | 💣️             |
+| trie_retrieve             | ✅️             |
 | trie_store                | 💣️             |
 | trie_delete               | ✖️              |
 | trie_enumerate            | ✅️              |
@@ -44,8 +44,8 @@ The FFI is intended to be a drop in replacement for original libdatrie, except f
 | trie_iterator_new         | 💣️             |
 | trie_iterator_free        | ✅️              |
 | trie_iterator_next        | ✅️              |
-| trie_iterator_get_key     | 💣️             |
-| trie_iterator_get_data    | ✖️              |
+| trie_iterator_get_key     | ✅️             |
+| trie_iterator_get_data    | ✅️              |
 | alpha_char_strcmp         | ✅️              |
 | trie_get_serialized_size  | ✖️              |
 | trie_serialize            | ✖️              |
