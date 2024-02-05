@@ -39,7 +39,9 @@ extern "C" fn trie_iterator_next(iter: &mut TrieIter) -> bool {
 extern "C" fn trie_iterator_get_key(iter: &mut TrieIter) -> *mut AlphaChar {
     // AlphaChar *     trie_iterator_get_key (const TrieIterator *iter);
     match iter.get_key() {
-        Some(mut key) => key.as_mut_ptr(), // TODO: This is incorrect - it may have too short lifetime or leak
+        // TODO: This is incorrect - it may have too short lifetime or leak
+        // TODO: This must be freeable with libc::free()
+        Some(mut key) => key.as_mut_ptr(),
         None => null_mut(),
     }
 }

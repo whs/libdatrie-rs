@@ -37,7 +37,7 @@ use crate::alphamaploader::AlphaMapLoader;
  * which means the largest AlphaChar set that is supported is of 255
  * values, as the special value of 0 is reserved for null-termination code.
  */
-use crate::{AlphaChar, TrieChar};
+use crate::{AlphaChar, TrieChar, TrieIndex};
 use byteorder::{BigEndian, WriteBytesExt};
 use range_map::{Range, RangeSet};
 use std::io;
@@ -51,7 +51,7 @@ pub struct AlphaMap {
 
     // computed fields
     min: AlphaChar,
-    alpha2trie: Vec<Option<TrieChar>>,
+    alpha2trie: Vec<Option<TrieIndex>>,
     trie2alpha: Vec<Option<AlphaChar>>,
 }
 
@@ -72,27 +72,37 @@ impl AlphaMap {
     }
 
     fn rebuild(&mut self) {
-        if self.set.is_empty() {
-            self.alpha2trie = Vec::new();
-            self.trie2alpha = Vec::new();
-            return;
-        }
+        // alpha_begin = first character = min
 
-        let min = self.set.ranges().next().unwrap().start;
+        let first_range = match self.set.ranges().next() {
+            Some(v) => v,
+            None => {
+                self.alpha2trie = Vec::new();
+                self.trie2alpha = Vec::new();
+                return;
+            }
+        };
+        let min = first_range.start;
         let max = self.set.ranges().last().unwrap().end;
         self.min = min;
-        let n_trie = self.set.num_elements();
+        let n_trie = self.set.num_elements() + 1;
+        let n_alpha = max - min + 1;
 
-        self.alpha2trie = vec![None; (max - min + 1) as usize];
-        self.trie2alpha = vec![None; n_trie + 1];
+        self.alpha2trie = vec![None; n_alpha as usize];
+        self.trie2alpha = vec![None; n_trie];
 
         for (index, value) in (1..).zip(self.set.elements()) {
-            self.alpha2trie[(value - min) as usize] = Some(index as TrieChar);
+            self.alpha2trie[(value - min) as usize] = Some(index as TrieIndex);
             self.trie2alpha[index] = Some(value);
         }
+
+        self.trie2alpha[0] = Some(0);
     }
 
-    pub fn char_to_trie(&self, ch: AlphaChar) -> Option<TrieChar> {
+    pub fn char_to_trie(&self, ch: AlphaChar) -> Option<TrieIndex> {
+        if ch == 0 {
+            return Some(0);
+        }
         if ch < self.min {
             return None;
         }
@@ -115,7 +125,7 @@ impl AlphaMap {
                 if trie_ch.is_none() {
                     error = true;
                 }
-                trie_ch
+                trie_ch.map(|v| v as TrieChar)
             })
             .collect();
 
@@ -126,7 +136,7 @@ impl AlphaMap {
         Some(out)
     }
 
-    pub fn to_alpha(&self, ch: TrieChar) -> Option<AlphaChar> {
+    pub fn to_char(&self, ch: TrieChar) -> Option<AlphaChar> {
         // TODO flatten: rust#67441
         match self.trie2alpha.get(ch as usize) {
             Some(v) => *v,
@@ -137,7 +147,7 @@ impl AlphaMap {
     pub fn to_tries<'a, T: 'a + Iterator<Item = AlphaChar>>(
         &'a self,
         ch: T,
-    ) -> impl Iterator<Item = Option<TrieChar>> + 'a {
+    ) -> impl Iterator<Item = Option<TrieIndex>> + 'a {
         ch.map(|v| self.char_to_trie(v))
     }
 
@@ -145,7 +155,7 @@ impl AlphaMap {
     pub fn to_tries_without_invalids<'a, T: 'a + Iterator<Item = AlphaChar>>(
         &'a self,
         ch: T,
-    ) -> impl Iterator<Item = TrieChar> + 'a {
+    ) -> impl Iterator<Item = TrieIndex> + 'a {
         ch.map(|v| self.char_to_trie(v)).filter_map(|v| v)
     }
 
@@ -153,7 +163,7 @@ impl AlphaMap {
         &'a self,
         ch: T,
     ) -> impl Iterator<Item = Option<AlphaChar>> + 'a {
-        ch.map(|v| self.to_alpha(v))
+        ch.map(|v| self.to_char(v))
     }
 
     /// Map input TrieChar iterator to AlphaChar, dropping invalid characters
@@ -161,7 +171,7 @@ impl AlphaMap {
         &'a self,
         ch: T,
     ) -> impl Iterator<Item = AlphaChar> + 'a {
-        ch.map(|v| self.to_alpha(v)).filter_map(|v| v)
+        ch.map(|v| self.to_char(v)).filter_map(|v| v)
     }
 
     pub fn load<R: Read>(&mut self, reader: &mut R) -> io::Result<()> {
@@ -205,7 +215,7 @@ mod tests {
         map.add_range(10, 20);
         map.add_range(100, 110);
 
-        assert_eq!(map.char_to_trie(0), None);
+        assert_eq!(map.char_to_trie(0), Some(0));
         assert_eq!(map.char_to_trie(10), Some(1));
         assert_eq!(map.char_to_trie(20), Some(11));
         assert_eq!(map.char_to_trie(21), None);
@@ -216,19 +226,28 @@ mod tests {
     }
 
     #[test]
-    fn to_alpha() {
+    fn map_255() {
+        let mut map = AlphaMap::new();
+        map.add_range(0, 255);
+        assert_eq!(map.char_to_trie(0), Some(0));
+        assert_eq!(map.char_to_trie(254), Some(255));
+        assert_eq!(map.char_to_trie(255), Some(256));
+        assert_eq!(map.to_char(255), Some(254));
+    }
+
+    #[test]
+    fn to_char() {
         let mut map = AlphaMap::new();
         map.add_range(10, 20);
         map.add_range(100, 110);
 
-        assert_eq!(map.to_alpha(0), None);
-        assert_eq!(map.to_alpha(1), Some(10));
-        assert_eq!(map.to_alpha(10), Some(19));
-        assert_eq!(map.to_alpha(11), Some(20));
-        assert_eq!(map.to_alpha(12), Some(100));
-        assert_eq!(map.to_alpha(22), Some(110));
-        assert_eq!(map.to_alpha(23), None);
-        assert_eq!(map.to_alpha(255), None);
+        assert_eq!(map.to_char(0), Some(0));
+        assert_eq!(map.to_char(10), Some(19));
+        assert_eq!(map.to_char(11), Some(20));
+        assert_eq!(map.to_char(12), Some(100));
+        assert_eq!(map.to_char(22), Some(110));
+        assert_eq!(map.to_char(23), None);
+        assert_eq!(map.to_char(255), None);
     }
 
     #[test]
@@ -242,7 +261,7 @@ mod tests {
             map.to_tries([0, 10, 20, 21, 100, 110, 111, 10000].into_iter())
                 .collect::<Vec<_>>(),
             [
-                None,
+                Some(0),
                 Some(1),
                 Some(11),
                 None,
@@ -265,7 +284,7 @@ mod tests {
             map.to_alphas([0, 1, 10, 11, 12, 21, 22, 23, 255].into_iter())
                 .collect::<Vec<_>>(),
             [
-                None,
+                Some(0),
                 Some(10),
                 Some(19),
                 Some(20),

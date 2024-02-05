@@ -90,7 +90,7 @@ impl Trie {
                 None => return None,
             };
 
-            match self.darray.walk(state, tc) {
+            match self.darray.walk(state, tc as TrieChar) {
                 Some(new_state) => state = new_state,
                 None => return None,
             }
@@ -109,7 +109,7 @@ impl Trie {
                 Some(v) => v,
                 None => return None,
             };
-            match self.tail.walk_char(state, suffix_idx, tc) {
+            match self.tail.walk_char(state, suffix_idx, tc as TrieChar) {
                 Some(v) => suffix_idx = v,
                 None => return None,
             }
@@ -145,7 +145,7 @@ impl Trie {
                 None => return Err(StoreError::KeyOutOfRange),
             };
 
-            match self.darray.walk(state, tc) {
+            match self.darray.walk(state, tc as TrieChar) {
                 Some(new_state) => {
                     state = new_state;
                 }
@@ -205,7 +205,10 @@ impl Trie {
         suffix: &[TrieChar],
         data: TrieData,
     ) -> Result<(), StoreError> {
-        let new_da = self.darray.insert_branch(sep_node, suffix[0]).ok_or(StoreError::Overflow)?;
+        let new_da = self
+            .darray
+            .insert_branch(sep_node, suffix[0])
+            .ok_or(StoreError::Overflow)?;
 
         let new_tail = self.tail.add_suffix(&suffix[1..suffix.len()]);
         self.tail.set_data(new_tail, data).unwrap();
@@ -225,7 +228,7 @@ pub enum StoreError {
     /// The key is a duplicate. Only returned from [Trie.store_if_absent]
     Duplicate,
     /// Trie is full
-    Overflow
+    Overflow,
 }
 
 #[derive(Clone, Debug)]
@@ -251,7 +254,7 @@ impl<'a> TrieState<'a> {
             // return self.trie.tail.walk_char(self.index, self.suffix_idx, tc);
         }
 
-        let next_state = match self.trie.darray.walk(self.index, tc) {
+        let next_state = match self.trie.darray.walk(self.index, tc as TrieChar) {
             Some(v) => v,
             None => return false,
         };
@@ -281,7 +284,7 @@ impl<'a> TrieState<'a> {
             //     .is_walkable_char(self.index, self.suffix_idx, tc);
         }
 
-        self.trie.darray.is_walkable(self.index, tc).unwrap()
+        self.trie.darray.is_walkable(self.index, tc as TrieChar).unwrap()
     }
 
     pub fn walkable_chars(&self, chars: &[AlphaChar]) -> i32 {
@@ -397,12 +400,14 @@ mod test {
 
     #[test]
     fn test_null_trie() {
+        // Ported from test_null_trie.c
         let trie = test_utils::trie_new();
         assert_eq!(trie.iter().count(), 0)
     }
 
     #[test]
-    fn test_store() {
+    fn test_byte_alpha() {
+        // Ported from test_byte_alpha.c
         let mut alphamap = AlphaMap::new();
         alphamap.add_range(0x00, 0xff);
         let mut trie = Trie::new(alphamap);
@@ -418,5 +423,6 @@ mod test {
             let b: Vec<AlphaChar> = item.bytes().map(|v| v as AlphaChar).collect();
             trie.store(&b, 1);
         }
+        todo!();
     }
 }

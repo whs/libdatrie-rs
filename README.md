@@ -14,10 +14,10 @@ The FFI is intended to be a drop in replacement for original libdatrie, except f
 
 | Function                  | Available       |
 |---------------------------|-----------------|
-| alpha_map_new             | ✖️              |
-| alpha_map_clone           | ✖️              |
-| alpha_map_free            | ✖️              |
-| alpha_map_add_range       | ✖️              |
+| alpha_map_new             | ✅️              |
+| alpha_map_clone           | ✅️              |
+| alpha_map_free            | ✅️              |
+| alpha_map_add_range       | ✅️              |
 | alpha_char_strlen         | ✅️              |
 | trie_new                  | ✅️              |
 | trie_new_from_file        | ✅️              |

@@ -41,6 +41,11 @@ pub struct DArray {
 impl DArray {
     pub fn new() -> Self {
         let mut cell = vec![
+            // Signature
+            Cell {
+                base: DA_SIGNATURE as TrieIndex,
+                check: 3,
+            },
             // Free circular list pointers
             Cell {
                 base: -1,
@@ -55,16 +60,16 @@ impl DArray {
 
     pub fn get_root(&self) -> TrieIndex {
         // Position of root node according to new()
-        1
+        2
     }
 
     #[inline]
     fn get_free_list(&self) -> TrieIndex {
         // Position of free circular list according to new()
-        0
+        1
     }
 
-    const POOL_BEGIN: TrieIndex = 2;
+    const POOL_BEGIN: TrieIndex = 3;
 
     pub fn get_base(&self, index: TrieIndex) -> Option<TrieIndex> {
         self.cell.get(index as usize).map(|v| v.base)
@@ -105,7 +110,7 @@ impl DArray {
     /// Return the index of the new node
     pub fn insert_branch(&mut self, index: TrieIndex, char: TrieChar) -> Option<TrieIndex> {
         let base = self.get_base(index);
-        let insert_point= match base {
+        let insert_point = match base {
             Some(base) => {
                 let next = base.checked_add(char as TrieIndex);
 
@@ -196,10 +201,10 @@ impl DArray {
             s = pool_start;
             loop {
                 if !self.extend_pool(s) {
-                    return None
+                    return None;
                 }
                 if self.get_check(s).unwrap() < 0 {
-                    break
+                    break;
                 }
                 s += 1;
             }
@@ -220,7 +225,8 @@ impl DArray {
     fn fit_symbol(&mut self, base: TrieIndex, symbols: &Symbols) -> bool {
         symbols.iter().copied().all(|sym| {
             // Symbol fit if base+sym is not overflowing, and the cell is free
-            base.checked_add(sym as TrieIndex) != None && self.check_free_cell(base + (sym as TrieIndex))
+            base.checked_add(sym as TrieIndex) != None
+                && self.check_free_cell(base + (sym as TrieIndex))
         })
     }
 
@@ -258,6 +264,7 @@ impl DArray {
     }
 
     fn extend_pool(&mut self, to_index: TrieIndex) -> bool {
+        debug_assert_eq!(self.cell[0].check, self.cell.len() as TrieIndex);
         if to_index <= 0 || to_index > TrieIndex::MAX {
             return false;
         }
@@ -272,7 +279,7 @@ impl DArray {
         for i in new_begin..to_index {
             self.cell.push(Cell {
                 check: -(i + 1),
-                base: -(i-1), // old code is set_base(i+1, -i)
+                base: -(i - 1), // old code is set_base(i+1, -i)
             })
         }
 
@@ -282,6 +289,9 @@ impl DArray {
         self.set_base(new_begin, -free_tail);
         self.set_check(to_index, -self.get_free_list());
         self.set_base(self.get_free_list(), -to_index);
+
+        // update header cell
+        self.cell[0].check = self.cell.len() as TrieIndex;
 
         true
     }
