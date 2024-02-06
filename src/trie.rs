@@ -134,66 +134,69 @@ impl Trie {
     ) -> Result<(), StoreError> {
         // walk through branches
         let mut state = self.darray.get_root();
-        let mut key_iter = key.iter().copied().enumerate();
-        while let Some((p, ch)) = key_iter.next() {
+        let mut key_iter = key.iter().copied();
+        // I tried enumerate() but it wouldn't play nice with [sep] down there without allocating
+        let mut key_idx = 0;
+        while let Some(ch) = key_iter.next() {
             if self.darray.is_separate(state) {
                 break;
             }
 
-            let tc = match self.alpha_map.char_to_trie(ch) {
-                Some(v) => v,
-                None => return Err(StoreError::KeyOutOfRange),
-            };
+            let tc = self
+                .alpha_map
+                .char_to_trie(ch)
+                .ok_or(StoreError::KeyOutOfRange)?;
 
             match self.darray.walk(state, tc as TrieChar) {
                 Some(new_state) => {
                     state = new_state;
                 }
                 None => {
-                    let key_str = match self.alpha_map.to_trie_str(&key[p..]) {
-                        Some(v) => v,
-                        None => return Err(StoreError::KeyOutOfRange),
-                    };
+                    let key_str = self
+                        .alpha_map
+                        .to_trie_str(&key[key_idx..])
+                        .ok_or(StoreError::KeyOutOfRange)?;
                     return self.branch_in_branch(state, &key_str, data);
                 }
             }
+
+            key_idx += 1;
         }
 
         // walk through tail
-        let mut t = match self.darray.get_tail_index(state) {
-            Some(v) => v,
-            None => return Err(StoreError::NotExists), // I think the original code expect this to not fail?
-        };
+        let sep = &key[key_idx..];
+        let t = self
+            .darray
+            .get_tail_index(state)
+            .ok_or(StoreError::InternalError)?;
         let mut suffix_idx = 0;
-        while let Some((p, ch)) = key_iter.next() {
-            let tc = match self.alpha_map.char_to_trie(key[p]) {
-                Some(v) => v,
-                None => return Err(StoreError::KeyOutOfRange),
-            };
-            /*if (!tail_walk_char (trie->tail, t, &suffix_idx, (TrieChar) tc)) {
-                TrieChar *tail_str;
-                Bool      res;
+        while let Some(ch) = key_iter.next() {
+            let tc = self
+                .alpha_map
+                .char_to_trie(ch)
+                .ok_or(StoreError::KeyOutOfRange)?;
 
-                tail_str = alpha_map_char_to_trie_str (trie->alpha_map, sep);
-                if (!tail_str)
-                    return FALSE;
-                res = trie_branch_in_tail (trie, s, tail_str, data);
-                free (tail_str);
+            match self.tail.walk_char(t, suffix_idx, tc as TrieChar) {
+                Some(suffix) => suffix_idx = suffix,
+                None => {
+                    let tail_str = match self.alpha_map.to_trie_str(sep) {
+                        Some(v) => v,
+                        None => return Err(StoreError::KeyOutOfRange),
+                    };
+                    return self.branch_in_tail(state, &tail_str, data);
+                }
+            }
 
-                return res;
-            }*/
-
-            todo!();
+            key_idx += 1;
         }
 
         if !overwrite {
             return Err(StoreError::Duplicate);
         }
 
-        match self.tail.set_data(t, data) {
-            Ok(_) => {}
-            Err(_) => return Err(todo!()),
-        }
+        self.tail
+            .set_data(t, data)
+            .map_err(|_| StoreError::InternalError)?;
         self.is_dirty = true;
 
         Ok(())
@@ -211,11 +214,55 @@ impl Trie {
             .ok_or(StoreError::Overflow)?;
 
         let new_tail = self.tail.add_suffix(&suffix[1..suffix.len()]);
-        self.tail.set_data(new_tail, data).unwrap();
+        self.tail
+            .set_data(new_tail, data)
+            .map_err(|_| StoreError::InternalError)?;
         self.darray.set_tail_index(new_da, new_tail);
 
         self.is_dirty = true;
         Ok(())
+    }
+
+    fn branch_in_tail(
+        &mut self,
+        sep_node: TrieIndex,
+        suffix: &[TrieChar],
+        data: TrieData,
+    ) -> Result<(), StoreError> {
+        let old_tail = self
+            .darray
+            .get_tail_index(sep_node)
+            .ok_or(StoreError::InternalError)?;
+        let old_suffix = self
+            .tail
+            .get_suffix(old_tail)
+            .ok_or(StoreError::InternalError)?;
+
+        // TODO: On fail from this point on, call da_prune_upto & trie_da_set_tail_index
+        let mut p = 0;
+        let mut s = sep_node;
+        while old_suffix.get(p) == suffix.get(p) {
+            let t = self
+                .darray
+                .insert_branch(s, old_suffix[p])
+                .ok_or(StoreError::InternalError)?;
+            s = t;
+            p += 1;
+        }
+
+        let old_suffix = Vec::from(&old_suffix[p..]);
+
+        // TODO: insert_branch error could actually be overflow error or key mapping error
+        let old_da = self
+            .darray
+            .insert_branch(s, old_suffix[0])
+            .ok_or(StoreError::InternalError)?;
+        self.tail
+            .set_suffix(old_tail, &old_suffix)
+            .map_err(|_| StoreError::InternalError)?;
+        self.darray.set_tail_index(old_da, old_tail);
+
+        self.branch_in_branch(s, suffix, data)
     }
 }
 
@@ -229,6 +276,8 @@ pub enum StoreError {
     Duplicate,
     /// Trie is full
     Overflow,
+    /// This should not be returned
+    InternalError,
 }
 
 #[derive(Clone, Debug)]
@@ -243,6 +292,15 @@ pub struct TrieState<'trie> {
 }
 
 impl<'a> TrieState<'a> {
+    pub fn to_iterator(&self) -> TrieIter<'a> {
+        TrieIter {
+            trie: self.trie,
+            root: self.trie.root(),
+            state: None,
+            key: Vec::with_capacity(20),
+        }
+    }
+
     pub fn walk(&mut self, c: AlphaChar) -> bool {
         let tc = match self.trie.alpha_map.char_to_trie(c) {
             Some(v) => v,
@@ -284,7 +342,10 @@ impl<'a> TrieState<'a> {
             //     .is_walkable_char(self.index, self.suffix_idx, tc);
         }
 
-        self.trie.darray.is_walkable(self.index, tc as TrieChar).unwrap()
+        self.trie
+            .darray
+            .is_walkable(self.index, tc as TrieChar)
+            .unwrap()
     }
 
     pub fn walkable_chars(&self, chars: &[AlphaChar]) -> i32 {
@@ -396,7 +457,8 @@ impl<'a> Iterator for TrieIter<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::{test_utils, AlphaChar, AlphaMap, Trie};
+    use crate::{alphachars_to_string, test_utils, AlphaChar, AlphaMap, ToAlphaChars, Trie};
+    use std::collections::HashMap;
 
     #[test]
     fn test_null_trie() {
@@ -418,11 +480,26 @@ mod test {
 
     #[test]
     fn test_iter() {
+        // Ported from test_iterator.c
         let mut trie = test_utils::trie_new();
         for item in test_utils::DICT_SRC {
-            let b: Vec<AlphaChar> = item.bytes().map(|v| v as AlphaChar).collect();
-            trie.store(&b, 1);
+            let b: Vec<AlphaChar> = item.to_alphachars();
+            trie.store(&b, 1).unwrap();
         }
-        todo!();
+
+        let mut dict_found: HashMap<String, bool> =
+            HashMap::from_iter(test_utils::DICT_SRC.iter().map(|v| (v.to_string(), false)));
+
+        for (key, key_data) in trie.iter() {
+            let key_str = alphachars_to_string(&key).unwrap();
+            let value = dict_found.get_mut(&key_str).unwrap();
+            *value = true;
+            assert_eq!(key_data, Some(1));
+            println!("Found key {}", key_str);
+        }
+
+        for (k, v) in dict_found {
+            assert_eq!(v, true, "Key '{}' not found", k);
+        }
     }
 }

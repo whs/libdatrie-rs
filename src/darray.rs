@@ -40,7 +40,7 @@ pub struct DArray {
 
 impl DArray {
     pub fn new() -> Self {
-        let mut cell = vec![
+        let cell = vec![
             // Signature
             Cell {
                 base: DA_SIGNATURE as TrieIndex,
@@ -52,7 +52,10 @@ impl DArray {
                 check: -1,
             },
             // Root node
-            Cell { base: Self::POOL_BEGIN, check: 0 },
+            Cell {
+                base: Self::POOL_BEGIN,
+                check: 0,
+            },
         ];
 
         DArray { cell }
@@ -190,7 +193,7 @@ impl DArray {
 
     fn find_free_base(&mut self, symbols: &Symbols) -> Option<TrieIndex> {
         // find first free cell that is beyond the first symbol
-        let mut first_sym = symbols.get(0).unwrap();
+        let first_sym = symbols.get(0).unwrap();
         let mut s = -self.get_check(self.get_free_list()).unwrap();
         let pool_start = (first_sym as TrieIndex) + Self::POOL_BEGIN;
         while s != self.get_free_list() && s < pool_start {

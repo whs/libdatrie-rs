@@ -1,7 +1,7 @@
-use std::mem::size_of;
 use crate::cffi::trie::TRIE_DATA_ERROR;
 use crate::trie::{TrieIter, TrieState};
 use crate::{AlphaChar, TrieData};
+use std::mem::size_of;
 use std::ptr::null_mut;
 use std::slice;
 
@@ -13,7 +13,7 @@ use std::slice;
 #[no_mangle]
 extern "C" fn trie_iterator_new<'a>(state: &'a TrieState) -> *mut TrieIter<'a> {
     // TrieIterator *  trie_iterator_new (TrieState *s);
-    todo!()
+    Box::into_raw(Box::new(state.to_iterator()))
 }
 
 /// Destruct the iterator and free its allocated memory.
@@ -41,7 +41,7 @@ extern "C" fn trie_iterator_next(iter: &mut TrieIter) -> bool {
 extern "C" fn trie_iterator_get_key(iter: &mut TrieIter) -> *mut AlphaChar {
     // AlphaChar *     trie_iterator_get_key (const TrieIterator *iter);
     match iter.get_key() {
-        Some(mut key) => unsafe {
+        Some(key) => unsafe {
             // Clone to libc-owned memory with null byte
             let len = key.len() + 1;
             let key_c = libc::malloc(len * size_of::<AlphaChar>()) as *mut AlphaChar;

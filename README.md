@@ -41,7 +41,7 @@ The FFI is intended to be a drop in replacement for original libdatrie, except f
 | trie_fread                | ✅️ (Unix only) |
 | trie_fwrite               | ✖️              |
 | trie_state_walkable_chars | 💣️             |
-| trie_iterator_new         | 💣️             |
+| trie_iterator_new         | ✅️             |
 | trie_iterator_free        | ✅️              |
 | trie_iterator_next        | ✅️              |
 | trie_iterator_get_key     | ✅️             |

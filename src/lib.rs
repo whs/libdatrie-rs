@@ -17,6 +17,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 pub use alphamap::AlphaMap;
+use std::string::FromUtf8Error;
 pub use trie::{StoreError, Trie, TrieIter, TrieState};
 
 mod alphamap;
@@ -39,3 +40,19 @@ pub type AlphaChar = u32;
 pub type TrieIndex = i32;
 pub type TrieChar = u8;
 pub type TrieData = i32;
+
+/// Convert &[AlphaChar] to String
+pub fn alphachars_to_string(ac: &[AlphaChar]) -> Result<String, FromUtf8Error> {
+    let vec = ac.iter().map(|v| *v as u8).collect();
+    String::from_utf8(vec)
+}
+
+trait ToAlphaChars {
+    fn to_alphachars(&self) -> Vec<AlphaChar>;
+}
+
+impl<'a> ToAlphaChars for &'a str {
+    fn to_alphachars(&self) -> Vec<AlphaChar> {
+        self.bytes().map(|v| v as AlphaChar).collect()
+    }
+}

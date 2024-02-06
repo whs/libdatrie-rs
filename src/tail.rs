@@ -117,7 +117,7 @@ impl Tail {
     /// Returns the total numbers of characters successfully walked.
     ///
     /// For compatiblity with C libdatrie, advance suffix_idx by the returned value.
-    #[must_use]
+    #[must_use = "Update suffix_idx with the return value"]
     pub fn walk_str(&self, index: TrieIndex, suffix_idx: usize, str: &[TrieChar]) -> usize {
         let suffix = match self.get_suffix(index) {
             Some(v) => v,
@@ -139,7 +139,7 @@ impl Tail {
     /// suffix_idx, using given character c. If the walk is successful,
     /// it returns the next character index.
     /// Otherwise, it returns None
-    #[must_use]
+    #[must_use = "Update suffix_idx with the return value"]
     pub fn walk_char(&self, index: TrieIndex, suffix_idx: usize, char: TrieChar) -> Option<usize> {
         let suffix = match self.get_suffix(index) {
             Some(v) => v,

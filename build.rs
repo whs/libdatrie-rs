@@ -12,7 +12,8 @@ fn main() {
         .with_include_version(true)
         .with_cpp_compat(true)
         .with_no_includes()
-        .with_include("limits.h")
+        .with_include("stdint.h")
+        .with_include("stdbool.h")
         .with_include("stdio.h")
         .rename_item("TrieIter", "TrieIterator")
         .with_after_include(
@@ -23,7 +24,7 @@ typedef enum { DA_FALSE = 0, DA_TRUE = 1 } Bool;
 #define TRIE_CHAR_TERM    '\0'
 #define TRIE_CHAR_MAX     255
 
-typedef int32 TrieIndex;
+typedef int32_t TrieIndex;
 #define TRIE_INDEX_ERROR  0
 #define TRIE_INDEX_MAX    0x7fffffff
 

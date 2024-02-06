@@ -168,6 +168,7 @@ extern "C" fn trie_enumerate(
 ) -> bool {
     // Bool trie_enumerate (const Trie *trie, TrieEnumFunc enum_func, void *user_data)
     for (ch, data) in trie.iter() {
+        // TODO: Null terminate ch
         let cont = enum_func(ch.as_ptr(), data.unwrap_or(TRIE_DATA_ERROR), user_data);
         if !cont {
             return false;
