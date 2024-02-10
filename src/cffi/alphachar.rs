@@ -22,7 +22,7 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
     let mut str2pos = str2;
 
     unsafe {
-        while *str1pos == *str2pos {
+        while *str1pos != 0 && *str1pos == *str2pos {
             str1pos = str1pos.offset(1);
             str2pos = str2pos.offset(1);
         }
@@ -59,5 +59,13 @@ mod test {
         assert_eq!(alpha_char_strcmp(ch1.as_ptr(), ch1.as_ptr()), 0);
         assert_eq!(alpha_char_strcmp(ch1.as_ptr(), ch2.as_ptr()), -1);
         assert_eq!(alpha_char_strcmp(ch2.as_ptr(), ch1.as_ptr()), 1);
+    }
+
+    #[test]
+    fn test_alpha_char_strcmp_longer() {
+        let ch1: [AlphaChar; 4] = [1, 1, 2, 0];
+        let ch2: [AlphaChar; 3] = [1, 1, 0];
+        assert_eq!(alpha_char_strcmp(ch1.as_ptr(), ch2.as_ptr()), 1);
+        assert_eq!(alpha_char_strcmp(ch2.as_ptr(), ch1.as_ptr()), -1);
     }
 }

@@ -242,6 +242,7 @@ impl Trie {
         let mut p = 0;
         let mut s = sep_node;
         while old_suffix.get(p) == suffix.get(p) {
+            // TODO: insert_branch error could actually be overflow error or key mapping error
             let t = self
                 .darray
                 .insert_branch(s, old_suffix[p])
@@ -250,17 +251,17 @@ impl Trie {
             p += 1;
         }
 
-        let old_suffix = Vec::from(&old_suffix[p..]);
-
-        // TODO: insert_branch error could actually be overflow error or key mapping error
-        let old_da = self
-            .darray
-            .insert_branch(s, old_suffix[0])
-            .ok_or(StoreError::InternalError)?;
+        if p < old_suffix.len() {
+            s = self
+                .darray
+                .insert_branch(s, old_suffix[p])
+                .ok_or(StoreError::InternalError)?;
+            p += 1;
+        }
         self.tail
-            .set_suffix(old_tail, &old_suffix)
+            .set_suffix(old_tail, old_suffix[p..].to_vec().as_ref())
             .map_err(|_| StoreError::InternalError)?;
-        self.darray.set_tail_index(old_da, old_tail);
+        self.darray.set_tail_index(s, old_tail);
 
         self.branch_in_branch(s, suffix, data)
     }
@@ -286,7 +287,7 @@ pub struct TrieState<'trie> {
     /// index in double-array/tail structures
     index: TrieIndex,
     /// suffix character offset, if in suffix
-    suffix_idx: i16,
+    suffix_idx: usize,
     /// whether it is currently in suffix part
     is_suffix: bool,
 }
@@ -359,7 +360,23 @@ impl<'a> TrieState<'a> {
     // Get value from a terminal state of trie
     // Returns None if called on non-terminal state
     pub fn get_data(&self) -> Option<TrieData> {
-        todo!()
+        match self.is_suffix {
+            true => {
+                // walk a terminal char to get the data from tail
+                if let Some(next_index) = self.trie.darray.walk(self.index, 0) { // TODO: We don't actually have 0
+                    if self.trie.darray.is_separate(next_index) {
+                        return self.trie.tail.get_data(self.trie.darray.get_tail_index(next_index).unwrap());
+                    }
+                }
+            },
+            false => {
+                if self.trie.tail.is_walkable_char(self.index, self.suffix_idx, 0) {
+                    return self.trie.tail.get_data(self.index);
+                }
+            },
+        }
+
+        None
     }
 }
 
@@ -491,8 +508,8 @@ mod test {
             HashMap::from_iter(test_utils::DICT_SRC.iter().map(|v| (v.to_string(), false)));
 
         for (key, key_data) in trie.iter() {
-            let key_str = alphachars_to_string(&key).unwrap();
-            let value = dict_found.get_mut(&key_str).unwrap();
+            let key_str = alphachars_to_string(&key).expect("Key cannot be parsed as String");
+            let value = dict_found.get_mut(&key_str).expect(&format!("Key '{}' missing", key_str));
             *value = true;
             assert_eq!(key_data, Some(1));
             println!("Found key {}", key_str);
@@ -501,5 +518,24 @@ mod test {
         for (k, v) in dict_found {
             assert_eq!(v, true, "Key '{}' not found", k);
         }
+    }
+
+    #[test]
+    fn test_term_state() {
+        // Ported from test_term_state.c
+        let mut trie = test_utils::trie_new();
+        trie.store("ab".to_alphachars().as_ref(), 1).unwrap();
+        trie.store("abc".to_alphachars().as_ref(), 2).unwrap();
+
+        let mut trie_state = trie.root();
+
+        assert!(trie_state.walk('a' .into()));
+        assert_eq!(trie_state.get_data(), None, "Retrieved data at 'a'");
+
+        assert!(trie_state.walk('b'.into()));
+        assert_eq!(trie_state.get_data(), Some(1), "Retrieved data at 'ab'");
+
+        assert!(trie_state.walk('c'.into()));
+        assert_eq!(trie_state.get_data(), Some(2), "Retrieved data at 'abc'");
     }
 }

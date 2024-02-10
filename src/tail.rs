@@ -151,6 +151,13 @@ impl Tail {
         }
         None
     }
+
+    pub fn is_walkable_char(&self, s: TrieIndex, suffix_idx: usize, char: TrieChar) -> bool {
+        match self.get_suffix(s) {
+            Some(suffix) => suffix.get(suffix_idx).copied() == Some(char),
+            None => false
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
