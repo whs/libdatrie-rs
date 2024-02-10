@@ -1,8 +1,7 @@
 use crate::alphamap::AlphaMap;
-use crate::cffi::alphachar::alpha_char_strlen;
 use crate::trie::{Trie, TrieState};
 use crate::{AlphaChar, TrieData};
-use core::slice;
+use null_terminated::Nul;
 use std::ffi::{c_char, CStr, OsStr};
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
@@ -114,7 +113,7 @@ extern "C" fn trie_retrieve(trie: &Trie, key: *const AlphaChar, data: *mut TrieD
     // Bool    trie_retrieve (const Trie      *trie,
     //                        const AlphaChar *key,
     //                        TrieData        *o_data);
-    let key_arr = unsafe { slice::from_raw_parts(key, alpha_char_strlen(key) as usize) };
+    let key_arr = &unsafe { Nul::new_unchecked(key) }[..];
     let out = trie.retrieve(key_arr);
     match out {
         Some(v) => {
@@ -133,9 +132,9 @@ extern "C" fn trie_retrieve(trie: &Trie, key: *const AlphaChar, data: *mut TrieD
 /// exist in trie, it will be appended. If it does, its current data will
 /// be overwritten.
 #[no_mangle]
-extern "C" fn trie_store(trie: &mut Trie, key: &AlphaChar, data: TrieData) -> bool {
+extern "C" fn trie_store(trie: &mut Trie, key: *const AlphaChar, data: TrieData) -> bool {
     // Bool    trie_store (Trie *trie, const AlphaChar *key, TrieData data);
-    let key_arr = unsafe { slice::from_raw_parts(key, alpha_char_strlen(key) as usize) };
+    let key_arr = &unsafe { Nul::new_unchecked(key) }[..];
     trie.store(key_arr, data).is_ok()
 }
 
@@ -145,9 +144,9 @@ extern "C" fn trie_store(trie: &mut Trie, key: &AlphaChar, data: TrieData) -> bo
 /// exist in trie, it will be inserted. If it does, the function will
 /// return failure and the existing value will not be touched.
 #[no_mangle]
-extern "C" fn trie_store_if_absent(trie: &mut Trie, key: &AlphaChar, data: TrieData) -> bool {
+extern "C" fn trie_store_if_absent(trie: &mut Trie, key: *const AlphaChar, data: TrieData) -> bool {
     // Bool    trie_store_if_absent (Trie *trie, const AlphaChar *key, TrieData data);
-    let key_arr = unsafe { slice::from_raw_parts(key, alpha_char_strlen(key) as usize) };
+    let key_arr = &unsafe { Nul::new_unchecked(key) }[..];
     trie.store_if_absent(key_arr, data).is_ok()
 }
 
