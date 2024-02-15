@@ -129,6 +129,8 @@ impl AlphaMap {
             })
             .collect();
 
+        // XXX: This do not null terminate if str is not null terminated
+
         if error {
             return None;
         }

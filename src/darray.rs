@@ -99,7 +99,7 @@ impl DArray {
     /// Walk the double-array trie from state index
     /// If there exists an edge from index with arc labeled input_char, this function
     /// returns the new state. Otherwise, it returns None
-    #[must_use]
+    #[must_use = "Update index with the output value"]
     pub fn walk(&self, index: TrieIndex, input_char: TrieChar) -> Option<TrieIndex> {
         let next = self.get_base(index).unwrap() + input_char as TrieIndex;
         if self.get_check(next) == Some(index) {
@@ -112,37 +112,34 @@ impl DArray {
     /// Note that it assumes that no such arc exists before inserting.
     /// Return the index of the new node
     pub fn insert_branch(&mut self, index: TrieIndex, char: TrieChar) -> Option<TrieIndex> {
-        let base = self.get_base(index);
-        let insert_point = match base {
-            Some(base) => {
-                let next = base.checked_add(char as TrieIndex);
+        let base = self.get_base(index).unwrap();
+        let insert_point = if base > 0 {
+            let next = base.checked_add(char as TrieIndex);
 
-                match next {
-                    Some(next) if self.get_check(next) == Some(index) => {
-                        // If already there, do not actually insert
-                        return Some(next);
-                    }
-                    Some(next) if self.check_free_cell(next) => next,
-                    _ => {
-                        // Relocate if overflow or not free
-                        let mut symbols = self.output_symbols(index);
-                        symbols.add(char);
-                        let new_base = self.find_free_base(&symbols)?;
+            match next {
+                Some(next) if self.get_check(next) == Some(index) => {
+                    // If already there, do not actually insert
+                    return Some(next);
+                }
+                Some(next) if self.check_free_cell(next) => next,
+                _ => {
+                    // Relocate if overflow or not free
+                    let mut symbols = self.output_symbols(index);
+                    symbols.add(char);
+                    let new_base = self.find_free_base(&symbols)?;
 
-                        self.relocate_base(index, new_base);
+                    self.relocate_base(index, new_base);
 
-                        new_base + (char as TrieIndex)
-                    }
+                    new_base + (char as TrieIndex)
                 }
             }
-            None => {
-                let mut symbols = Symbols::new();
-                symbols.add(char);
-                let new_base = self.find_free_base(&symbols)?;
-                self.set_base(index, new_base);
+        } else {
+            let mut symbols = Symbols::new();
+            symbols.add(char);
+            let new_base = self.find_free_base(&symbols)?;
+            self.set_base(index, new_base);
 
-                new_base + (char as TrieIndex)
-            }
+            new_base + (char as TrieIndex)
         };
         self.alloc_cell(insert_point);
         self.set_check(insert_point, index);
@@ -206,7 +203,7 @@ impl DArray {
                 if !self.extend_pool(s) {
                     return None;
                 }
-                if self.get_check(s).unwrap() < 0 {
+                if self.get_check(s).unwrap_or(0) < 0 {
                     break;
                 }
                 s += 1;
@@ -276,14 +273,12 @@ impl DArray {
         }
 
         let new_begin = self.cell.len() as TrieIndex;
-        let additional = to_index + 1 - self.cell.len() as TrieIndex;
-        self.cell.reserve_exact(additional as usize);
+        self.cell
+            .resize_with(to_index as usize + 1, || Cell { base: 0, check: 0 });
 
-        for i in new_begin..=to_index {
-            self.cell.push(Cell {
-                check: -(i + 1),
-                base: -(i - 1), // old code is set_base(i+1, -i)
-            })
+        for i in new_begin..to_index {
+            self.cell[i as usize].check = -(i + 1);
+            self.cell[i as usize + 1].base = -i;
         }
 
         // merge the new circular list to the old
@@ -319,8 +314,8 @@ impl DArray {
     }
 
     fn alloc_cell(&mut self, index: TrieIndex) {
-        let prev = -self.get_base(index).unwrap_or(0);
-        let next = -self.get_check(index).unwrap_or(0);
+        let prev = -self.get_base(index).unwrap();
+        let next = -self.get_check(index).unwrap();
 
         self.set_check(prev, -next);
         self.set_base(next, -prev);
@@ -373,18 +368,14 @@ impl DArray {
     /// Find first separate node in a sub-trie
     ///
     /// Find the first separate node under a sub-trie rooted at root.
-    /// On return, keybuff is appended with the key characters which walk from
+    /// On return, keybuf is appended with the key characters which walk from
     /// root to the separate node. This is for incrementally calculating the
     /// transition key, which is more efficient than later totally reconstructing
     /// key from the given separate node.
-    pub fn first_separate(
-        &self,
-        root: TrieIndex,
-        keybuff: &mut Vec<TrieChar>,
-    ) -> Option<TrieIndex> {
+    pub fn first_separate(&self, root: TrieIndex, keybuf: &mut Vec<TrieChar>) -> Option<TrieIndex> {
         let mut cur = root;
         loop {
-            let base = self.get_base(cur).unwrap();
+            let base = self.get_base(cur).unwrap_or(0);
             if base < 0 {
                 return Some(cur);
             }
@@ -395,7 +386,7 @@ impl DArray {
             match c {
                 None => return None,
                 Some(c) => {
-                    keybuff.push(c as TrieChar);
+                    keybuf.push(c as TrieChar);
                     cur = base + c;
                 }
             }

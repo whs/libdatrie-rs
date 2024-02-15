@@ -1,6 +1,6 @@
 use crate::darray::DArray;
 use crate::tail::Tail;
-use crate::{AlphaChar, AlphaMap, TrieChar, TrieData, TrieIndex};
+use crate::{AlphaChar, AlphaMap, TRIE_CHAR_TERM, TrieChar, TrieData, TrieIndex};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
@@ -118,10 +118,12 @@ impl Trie {
         self.tail.get_data(state)
     }
 
+    /// Store data into trie, overwrite data if key is already present
     pub fn store(&mut self, key: &[AlphaChar], data: TrieData) -> Result<(), StoreError> {
         self.store_conditionally(key, data, true)
     }
 
+    /// Store the data into trie, returning Err(StoreError::Duplicate) if key is already present without storing data
     pub fn store_if_absent(&mut self, key: &[AlphaChar], data: TrieData) -> Result<(), StoreError> {
         self.store_conditionally(key, data, false)
     }
@@ -134,14 +136,10 @@ impl Trie {
     ) -> Result<(), StoreError> {
         // walk through branches
         let mut state = self.darray.get_root();
-        let mut key_iter = key.iter().copied();
-        // I tried enumerate() but it wouldn't play nice with [sep] down there without allocating
+        // Iterator doesn't work quite well, but this add bound check
         let mut key_idx = 0;
-        while let Some(ch) = key_iter.next() {
-            if self.darray.is_separate(state) {
-                break;
-            }
-
+        while !self.darray.is_separate(state) {
+            let ch = key[key_idx];
             let tc = self
                 .alpha_map
                 .char_to_trie(ch)
@@ -160,6 +158,10 @@ impl Trie {
                 }
             }
 
+            if ch == 0 {
+                break;
+            }
+
             key_idx += 1;
         }
 
@@ -170,7 +172,8 @@ impl Trie {
             .get_tail_index(state)
             .ok_or(StoreError::InternalError)?;
         let mut suffix_idx = 0;
-        while let Some(ch) = key_iter.next() {
+        loop {
+            let ch = key[key_idx];
             let tc = self
                 .alpha_map
                 .char_to_trie(ch)
@@ -185,6 +188,10 @@ impl Trie {
                     };
                     return self.branch_in_tail(state, &tail_str, data);
                 }
+            }
+
+            if ch == 0 {
+                break;
             }
 
             key_idx += 1;
@@ -213,7 +220,13 @@ impl Trie {
             .insert_branch(sep_node, suffix[0])
             .ok_or(StoreError::Overflow)?;
 
-        let new_tail = self.tail.add_suffix(&suffix[1..suffix.len()]);
+        let mut rest_suffix = suffix;
+        if suffix[0] != TRIE_CHAR_TERM {
+            rest_suffix = &suffix[1..];
+            // TODO: suffix from the caller must be advanced
+        }
+
+        let new_tail = self.tail.add_suffix(rest_suffix);
         self.tail
             .set_data(new_tail, data)
             .map_err(|_| StoreError::InternalError)?;
@@ -251,19 +264,22 @@ impl Trie {
             p += 1;
         }
 
-        if p < old_suffix.len() {
-            s = self
-                .darray
-                .insert_branch(s, old_suffix[p])
-                .ok_or(StoreError::InternalError)?;
+        let old_da = self
+            .darray
+            .insert_branch(s, old_suffix[p])
+            .ok_or(StoreError::InternalError)?;
+
+        if old_suffix[p] != TRIE_CHAR_TERM {
             p += 1;
         }
+
         self.tail
             .set_suffix(old_tail, old_suffix[p..].to_vec().as_ref())
             .map_err(|_| StoreError::InternalError)?;
-        self.darray.set_tail_index(s, old_tail);
+        self.darray.set_tail_index(old_da, old_tail);
 
-        self.branch_in_branch(s, suffix, data)
+        // insert the new branch at the new separate point
+        self.branch_in_branch(s, &suffix[p..], data)
     }
 }
 
@@ -309,24 +325,29 @@ impl<'a> TrieState<'a> {
         };
 
         if self.is_suffix {
-            todo!();
-            // return self.trie.tail.walk_char(self.index, self.suffix_idx, tc);
+            let out = self.trie.tail.walk_char(self.index, self.suffix_idx, tc as TrieChar);
+            match out {
+                Some(idx) => {
+                    self.suffix_idx = idx;
+                    return true;
+                }
+                None => return false,
+            }
         }
 
-        let next_state = match self.trie.darray.walk(self.index, tc as TrieChar) {
-            Some(v) => v,
-            None => return false,
-        };
-
-        self.index = next_state;
-
-        if self.trie.darray.is_separate(self.index) {
-            self.index = self.trie.darray.get_tail_index(self.index).unwrap();
-            self.suffix_idx = 0;
-            self.is_suffix = true;
+        let ret = self.trie.darray.walk(self.index, tc as TrieChar);
+        match ret {
+            Some(index) => {
+                self.index = index;
+                if self.trie.darray.is_separate(index) {
+                    self.index = self.trie.darray.get_tail_index(index).unwrap();
+                    self.suffix_idx = 0;
+                    self.is_suffix = true;
+                }
+                return true;
+            },
+            _ => return false
         }
-
-        return true;
     }
 
     pub fn is_walkable(&self, c: AlphaChar) -> bool {
@@ -336,11 +357,10 @@ impl<'a> TrieState<'a> {
         };
 
         if self.is_suffix {
-            todo!();
-            // return self
-            //     .trie
-            //     .tail
-            //     .is_walkable_char(self.index, self.suffix_idx, tc);
+            return self
+                .trie
+                .tail
+                .is_walkable_char(self.index, self.suffix_idx, tc as TrieChar);
         }
 
         self.trie
@@ -362,18 +382,25 @@ impl<'a> TrieState<'a> {
     pub fn get_data(&self) -> Option<TrieData> {
         match self.is_suffix {
             true => {
-                // walk a terminal char to get the data from tail
-                if let Some(next_index) = self.trie.darray.walk(self.index, 0) { // TODO: We don't actually have 0
-                    if self.trie.darray.is_separate(next_index) {
-                        return self.trie.tail.get_data(self.trie.darray.get_tail_index(next_index).unwrap());
-                    }
-                }
-            },
-            false => {
-                if self.trie.tail.is_walkable_char(self.index, self.suffix_idx, 0) {
+                if self
+                    .trie
+                    .tail
+                    .is_walkable_char(self.index, self.suffix_idx, TRIE_CHAR_TERM)
+                {
                     return self.trie.tail.get_data(self.index);
                 }
-            },
+            }
+            false => {
+                // walk a terminal char to get the data from tail
+                if let Some(next_index) = self.trie.darray.walk(self.index, TRIE_CHAR_TERM) {
+                    if self.trie.darray.is_separate(next_index) {
+                        return self
+                            .trie
+                            .tail
+                            .get_data(self.trie.darray.get_tail_index(next_index).unwrap());
+                    }
+                }
+            }
         }
 
         None
@@ -500,7 +527,7 @@ mod test {
         // Ported from test_iterator.c
         let mut trie = test_utils::trie_new();
         for item in test_utils::DICT_SRC {
-            let b: Vec<AlphaChar> = item.to_alphachars();
+            let b: Vec<AlphaChar> = item.to_alphachars().unwrap();
             trie.store(&b, 1).unwrap();
         }
 
@@ -509,7 +536,9 @@ mod test {
 
         for (key, key_data) in trie.iter() {
             let key_str = alphachars_to_string(&key).expect("Key cannot be parsed as String");
-            let value = dict_found.get_mut(&key_str).expect(&format!("Key '{}' missing", key_str));
+            let value = dict_found
+                .get_mut(&key_str)
+                .expect(&format!("Key '{}' missing", key_str));
             *value = true;
             assert_eq!(key_data, Some(1));
             println!("Found key {}", key_str);
@@ -524,18 +553,20 @@ mod test {
     fn test_term_state() {
         // Ported from test_term_state.c
         let mut trie = test_utils::trie_new();
-        trie.store("ab".to_alphachars().as_ref(), 1).unwrap();
-        trie.store("abc".to_alphachars().as_ref(), 2).unwrap();
+        trie.store("ab".to_alphachars().unwrap().as_ref(), 1)
+            .unwrap();
+        trie.store("abc".to_alphachars().unwrap().as_ref(), 2)
+            .unwrap();
 
         let mut trie_state = trie.root();
 
-        assert!(trie_state.walk('a' .into()));
-        assert_eq!(trie_state.get_data(), None, "Retrieved data at 'a'");
+        assert!(trie_state.walk('a'.into()));
+        assert_eq!(trie_state.get_data(), None, "Incorrect data at 'a'");
 
         assert!(trie_state.walk('b'.into()));
-        assert_eq!(trie_state.get_data(), Some(1), "Retrieved data at 'ab'");
+        assert_eq!(trie_state.get_data(), Some(1), "Incorrect data at 'ab'");
 
         assert!(trie_state.walk('c'.into()));
-        assert_eq!(trie_state.get_data(), Some(2), "Retrieved data at 'abc'");
+        assert_eq!(trie_state.get_data(), Some(2), "Incorrect data at 'abc'");
     }
 }

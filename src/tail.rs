@@ -17,9 +17,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 use crate::tailloader::TailLoader;
-use crate::{TrieChar, TrieData, TrieIndex};
+use crate::{TRIE_CHAR_TERM, TrieChar, TrieData, TrieIndex};
 use byteorder::{BigEndian, WriteBytesExt};
-use std::cmp::min;
 use std::io;
 use std::io::{Read, Write};
 use std::iter::zip;
@@ -127,12 +126,15 @@ impl Tail {
         let iter = zip(str.iter(), suffix[suffix_idx..].iter());
 
         for (index, (in_ch, suffix_ch)) in iter.enumerate() {
-            if in_ch != suffix_ch {
+            if *in_ch != *suffix_ch {
                 return index;
+            }
+            if *suffix_ch == TRIE_CHAR_TERM {
+                return index + 1;
             }
         }
 
-        min(str.len(), suffix.len())
+        str.len()
     }
 
     /// Walk in the tail data at index, from given character position
@@ -141,13 +143,13 @@ impl Tail {
     /// Otherwise, it returns None
     #[must_use = "Update suffix_idx with the return value"]
     pub fn walk_char(&self, index: TrieIndex, suffix_idx: usize, char: TrieChar) -> Option<usize> {
-        let suffix = match self.get_suffix(index) {
-            Some(v) => v,
-            None => return None,
-        };
+        let suffix = self.get_suffix(index)?;
         let suffix_char = suffix.get(suffix_idx).copied();
         if suffix_char == Some(char) {
-            return Some(min(suffix_idx + 1, suffix.len() - 1));
+            if suffix_char == Some(TRIE_CHAR_TERM) {
+                return Some(suffix_idx);
+            }
+            return Some(suffix_idx + 1);
         }
         None
     }
@@ -155,7 +157,7 @@ impl Tail {
     pub fn is_walkable_char(&self, s: TrieIndex, suffix_idx: usize, char: TrieChar) -> bool {
         match self.get_suffix(s) {
             Some(suffix) => suffix.get(suffix_idx).copied() == Some(char),
-            None => false
+            None => false,
         }
     }
 }

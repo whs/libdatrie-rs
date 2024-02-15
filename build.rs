@@ -21,7 +21,6 @@ fn main() {
 typedef enum { DA_FALSE = 0, DA_TRUE = 1 } Bool;
 #define ALPHA_CHAR_ERROR   (~(AlphaChar)0)
 
-#define TRIE_CHAR_TERM    '\0'
 #define TRIE_CHAR_MAX     255
 
 typedef int32_t TrieIndex;
