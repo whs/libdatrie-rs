@@ -58,6 +58,7 @@ extern "C" fn trie_iterator_get_key(iter: &mut TrieIter) -> *mut AlphaChar {
 /// Get value for the entry referenced by an iterator. Getting value from an
 /// un-iterated (or broken for any reason) iterator will result in
 /// TRIE_DATA_ERROR.
+#[no_mangle]
 extern "C" fn trie_iterator_get_data(iter: &mut TrieIter) -> TrieData {
     // TrieData        trie_iterator_get_data (const TrieIterator *iter);
     iter.get_data().unwrap_or(TRIE_DATA_ERROR)

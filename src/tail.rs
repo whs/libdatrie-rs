@@ -17,7 +17,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 use crate::tailloader::TailLoader;
-use crate::{TRIE_CHAR_TERM, TrieChar, TrieData, TrieIndex};
+use crate::{TrieChar, TrieData, TrieIndex, TRIE_CHAR_TERM};
 use byteorder::{BigEndian, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};

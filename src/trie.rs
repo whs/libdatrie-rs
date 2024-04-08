@@ -1,7 +1,8 @@
 use crate::darray::DArray;
 use crate::tail::Tail;
-use crate::{AlphaChar, AlphaMap, TRIE_CHAR_TERM, TrieChar, TrieData, TrieIndex};
+use crate::{AlphaChar, AlphaMap, TrieChar, TrieData, TrieIndex, TRIE_CHAR_TERM};
 use std::ffi::OsStr;
+use std::fmt::Write;
 use std::fs::File;
 use std::io;
 use std::io::{BufReader, Read};
@@ -325,7 +326,10 @@ impl<'a> TrieState<'a> {
         };
 
         if self.is_suffix {
-            let out = self.trie.tail.walk_char(self.index, self.suffix_idx, tc as TrieChar);
+            let out = self
+                .trie
+                .tail
+                .walk_char(self.index, self.suffix_idx, tc as TrieChar);
             match out {
                 Some(idx) => {
                     self.suffix_idx = idx;
@@ -345,8 +349,8 @@ impl<'a> TrieState<'a> {
                     self.is_suffix = true;
                 }
                 return true;
-            },
-            _ => return false
+            }
+            _ => return false,
         }
     }
 
@@ -499,10 +503,46 @@ impl<'a> Iterator for TrieIter<'a> {
     }
 }
 
+pub(crate) struct TriePrinter<'a> {
+    trie: &'a Trie,
+    output: String,
+}
+
+impl<'a> TriePrinter<'a> {
+    fn build(&mut self) {
+        self.output.write_str("digraph Trie {\n").unwrap();
+
+        let index = self.trie.darray.get_root();
+        self.walk_node(index);
+
+        self.output.write_str("}").unwrap()
+    }
+
+    fn walk_node(&mut self, node: TrieIndex) {
+        let trie_ch = self.trie.darray.get_base(node).unwrap() as TrieChar;
+
+        let ch = self.trie.alpha_map.to_char(trie_ch).unwrap_or(0);
+        write!(self.output, "{} [label=\"{}\"]\n", node, ch).unwrap();
+
+        let mut keybuf = Vec::new();
+        let mut subnode_opt = self.trie.darray.first_separate(node, &mut keybuf);
+        while let Some(subnode) = subnode_opt {
+            write!(self.output, "{} -> {}\n", node, subnode).unwrap();
+            self.walk_node(subnode);
+            subnode_opt = self.trie.darray.next_separate(node, subnode, &mut keybuf);
+        }
+    }
+
+    pub fn output(&self) -> &str {
+        return &self.output
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{alphachars_to_string, test_utils, AlphaChar, AlphaMap, ToAlphaChars, Trie};
     use std::collections::HashMap;
+    use crate::trie::TriePrinter;
 
     #[test]
     fn test_null_trie() {
@@ -530,6 +570,10 @@ mod test {
             let b: Vec<AlphaChar> = item.to_alphachars().unwrap();
             trie.store(&b, 1).unwrap();
         }
+
+        // let mut printer = TriePrinter{trie: &trie, output: String::new()};
+        // printer.build();
+        // println!("{}", printer.output);
 
         let mut dict_found: HashMap<String, bool> =
             HashMap::from_iter(test_utils::DICT_SRC.iter().map(|v| (v.to_string(), false)));

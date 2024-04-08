@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [features]
 default = ["cffi"]
 cffi = ["dep:libc"]
+test_cdatrie = []
 
 [dependencies]
 byteorder = "1"
@@ -20,7 +21,8 @@ null-terminated = "0.3.17"
 libc = {version = "0.2.152", optional = true}
 
 [dev-dependencies]
-cdatrie = { path = "../cdatrie" }
+# flake doesn't like this
+#cdatrie = { path = "../cdatrie" }
 
 [build-dependencies]
 cbindgen = "0.26.0"

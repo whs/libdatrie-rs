@@ -30,11 +30,14 @@ mod darrayloader;
 mod symbols;
 mod tail;
 mod tailloader;
-#[cfg(all(test, not(feature = "cffi")))]
+#[cfg(all(test, feature = "test_cdatrie", not(feature = "cffi")))]
 mod test_cdatrie;
 #[cfg(test)]
 mod test_utils;
 mod trie;
+
+#[cfg(all(feature = "test_cdatrie", feature = "cffi"))]
+compile_error!("test_cdatrie cannot be enabled with cffi");
 
 /// AlphaChar is the alphabet character used in words of a target language
 /// A string of AlphaChar is null delimitered
@@ -85,7 +88,10 @@ pub trait ToAlphaChars {
 impl<'a> ToAlphaChars for &'a str {
     fn to_alphachars(&self) -> Result<Vec<AlphaChar>, NulError> {
         // FIXME: Use memchr
-        let has_inner_null = self.bytes().find(|v| *v as AlphaChar == ALPHA_CHAR_TERM).is_some();
+        let has_inner_null = self
+            .bytes()
+            .find(|v| *v as AlphaChar == ALPHA_CHAR_TERM)
+            .is_some();
         if has_inner_null {
             return Err(NulError());
         }
@@ -99,7 +105,9 @@ impl<'a> ToAlphaChars for &'a str {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ALPHA_CHAR_TERM, alphachars_to_string, AlphaCharStringError, NulError, ToAlphaChars};
+    use crate::{
+        alphachars_to_string, AlphaCharStringError, NulError, ToAlphaChars, ALPHA_CHAR_TERM,
+    };
 
     #[test]
     fn test_to_from_alphachars() {

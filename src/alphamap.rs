@@ -37,7 +37,7 @@ use crate::alphamaploader::AlphaMapLoader;
  * which means the largest AlphaChar set that is supported is of 255
  * values, as the special value of 0 is reserved for null-termination code.
  */
-use crate::{AlphaChar, TrieChar, TrieIndex};
+use crate::{AlphaChar, TrieChar, TrieIndex, TRIE_CHAR_TERM};
 use byteorder::{BigEndian, WriteBytesExt};
 use range_map::{Range, RangeSet};
 use std::io;
@@ -51,8 +51,8 @@ pub struct AlphaMap {
 
     // computed fields
     min: AlphaChar,
-    alpha2trie: Vec<Option<TrieIndex>>,
-    trie2alpha: Vec<Option<AlphaChar>>,
+    char2trie: Vec<Option<TrieIndex>>,
+    trie2char: Vec<Option<AlphaChar>>,
 }
 
 impl AlphaMap {
@@ -61,13 +61,15 @@ impl AlphaMap {
             set: RangeSet::new(),
 
             min: Default::default(),
-            alpha2trie: Vec::new(),
-            trie2alpha: Vec::new(),
+            char2trie: Vec::new(),
+            trie2char: Vec::new(),
         }
     }
 
     pub fn add_range(&mut self, start: AlphaChar, end: AlphaChar) {
-        self.set = self.set.union(&RangeSet::from_iter([Range { start, end }]));
+        self.set = self
+            .set
+            .union(&RangeSet::from_iter([Range::new(start, end)]));
         self.rebuild();
     }
 
@@ -77,8 +79,8 @@ impl AlphaMap {
         let first_range = match self.set.ranges().next() {
             Some(v) => v,
             None => {
-                self.alpha2trie = Vec::new();
-                self.trie2alpha = Vec::new();
+                self.char2trie = Vec::new();
+                self.trie2char = Vec::new();
                 return;
             }
         };
@@ -88,15 +90,15 @@ impl AlphaMap {
         let n_trie = self.set.num_elements() + 1;
         let n_alpha = max - min + 1;
 
-        self.alpha2trie = vec![None; n_alpha as usize];
-        self.trie2alpha = vec![None; n_trie];
+        self.char2trie = vec![None; n_alpha as usize];
+        self.trie2char = vec![None; n_trie];
 
         for (index, value) in (1..).zip(self.set.elements()) {
-            self.alpha2trie[(value - min) as usize] = Some(index as TrieIndex);
-            self.trie2alpha[index] = Some(value);
+            self.char2trie[(value - min) as usize] = Some(index as TrieIndex);
+            self.trie2char[index] = Some(value);
         }
 
-        self.trie2alpha[0] = Some(0);
+        self.trie2char[TRIE_CHAR_TERM as usize] = Some(0);
     }
 
     pub fn char_to_trie(&self, ch: AlphaChar) -> Option<TrieIndex> {
@@ -108,7 +110,7 @@ impl AlphaMap {
         }
 
         // TODO flatten: rust#67441
-        match self.alpha2trie.get((ch - self.min) as usize) {
+        match self.char2trie.get((ch - self.min) as usize) {
             Some(v) => *v,
             None => None,
         }
@@ -116,7 +118,7 @@ impl AlphaMap {
 
     pub fn to_trie_str(&self, str: &[AlphaChar]) -> Option<Vec<TrieChar>> {
         let mut error = false;
-        // TOOD try_collect: rust#94047
+        // TODO try_collect: rust#94047
         let out = str
             .iter()
             .copied()
@@ -140,7 +142,7 @@ impl AlphaMap {
 
     pub fn to_char(&self, ch: TrieChar) -> Option<AlphaChar> {
         // TODO flatten: rust#67441
-        match self.trie2alpha.get(ch as usize) {
+        match self.trie2char.get(ch as usize) {
             Some(v) => *v,
             None => None,
         }
