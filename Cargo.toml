@@ -7,22 +7,13 @@ license = "LGPL-2.1"
 [lib]
 crate-type = ["cdylib"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[features]
-default = ["cffi"]
-cffi = ["dep:libc"]
-test_cdatrie = []
-
 [dependencies]
-byteorder = "1"
-range-map = "0.2"
-arrayvec = "0.7.4"
+libc = "0.2"
 null-terminated = "0.3.17"
-libc = {version = "0.2.152", optional = true}
+byteorder = "1"
+cstream = "0.1.4"
 
-[dev-dependencies]
-# flake doesn't like this
-#cdatrie = { path = "../cdatrie" }
-
-[build-dependencies]
-cbindgen = "0.26.0"
+[profile.release-debug]
+inherits = "release"
+debug = true
+strip = "none"
