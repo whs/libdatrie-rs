@@ -1,10 +1,10 @@
 use crate::fileutils::*;
-use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
+use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
 use ::libc;
 use null_terminated::Nul;
 use std::cmp::Ordering;
 use std::{iter, ptr, slice};
-use std::marker::PhantomData;
+use crate::alpha_range::AlphaRange;
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -22,41 +22,6 @@ pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
-
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct AlphaRange {
-    pub next: *mut AlphaRange,
-    pub begin: AlphaChar,
-    pub end: AlphaChar,
-}
-
-impl AlphaRange {
-    pub fn iter(&self) -> impl Iterator<Item=&AlphaRange> {
-        AlphaRangeIter{
-            range: self,
-            phantom: PhantomData,
-        }
-    }
-}
-
-struct AlphaRangeIter<'a> {
-    range: *const AlphaRange,
-    phantom: PhantomData<&'a AlphaRange>,
-}
-
-impl<'a> Iterator for AlphaRangeIter<'a> {
-    type Item = &'a AlphaRange;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.range.is_null() {
-            return None;
-        }
-        let out = unsafe { &*self.range };
-        self.range = out.next;
-        Some(out)
-    }
-}
 
 pub type AlphaChar = u32;
 pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;

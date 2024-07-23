@@ -11,11 +11,12 @@
 pub mod alpha_map;
 pub mod darray;
 mod dstring;
-pub mod fileutils;
+mod fileutils;
 pub mod tail;
 pub mod trie;
 pub mod trie_string;
 mod types;
+mod alpha_range;
 
 pub mod tests {
     pub mod test_byte_alpha;
