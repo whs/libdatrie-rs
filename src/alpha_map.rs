@@ -1,9 +1,10 @@
-use std::cmp::Ordering;
-use std::{iter, ptr, slice};
+use crate::fileutils::*;
+use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
 use ::libc;
 use null_terminated::Nul;
-use crate::fileutils::*;
-use crate::trie_string::{TrieChar, TRIE_CHAR_TERM, trie_char_strlen};
+use std::cmp::Ordering;
+use std::{iter, ptr, slice};
+use std::marker::PhantomData;
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -30,6 +31,33 @@ pub struct AlphaRange {
     pub end: AlphaChar,
 }
 
+impl AlphaRange {
+    pub fn iter(&self) -> impl Iterator<Item=&AlphaRange> {
+        AlphaRangeIter{
+            range: self,
+            phantom: PhantomData,
+        }
+    }
+}
+
+struct AlphaRangeIter<'a> {
+    range: *const AlphaRange,
+    phantom: PhantomData<&'a AlphaRange>,
+}
+
+impl<'a> Iterator for AlphaRangeIter<'a> {
+    type Item = &'a AlphaRange;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.range.is_null() {
+            return None;
+        }
+        let out = unsafe { &*self.range };
+        self.range = out.next;
+        Some(out)
+    }
+}
+
 pub type AlphaChar = u32;
 pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;
 
@@ -40,10 +68,7 @@ pub extern "C" fn alpha_char_strlen(str: *const AlphaChar) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn alpha_char_strcmp(
-    str1: *const AlphaChar,
-    str2: *const AlphaChar,
-) -> i32 {
+pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaChar) -> i32 {
     let str1 = unsafe { Nul::new_unchecked(str1) };
     let str2 = unsafe { Nul::new_unchecked(str2) };
     match str1.cmp(str2) {
@@ -65,6 +90,68 @@ pub struct AlphaMap {
     pub trie_to_alpha_map: *mut AlphaChar,
 }
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
+
+impl AlphaMap {
+    fn range_iter(&self) -> Option<impl Iterator<Item = &AlphaRange>> {
+        if self.first_range.is_null() {
+            return None;
+        }
+
+        unsafe { return Some((&*self.first_range).iter()) }
+    }
+
+    fn alpha_to_trie_map_slice(&self) -> Option<&[TrieIndex]> {
+        if self.alpha_to_trie_map.is_null() {
+            return None;
+        }
+
+        unsafe {
+            Some(slice::from_raw_parts(
+                self.alpha_to_trie_map,
+                self.alpha_map_sz as usize,
+            ))
+        }
+    }
+
+    fn alpha_to_trie_map_slice_mut(&self) -> Option<&mut [TrieIndex]> {
+        if self.alpha_to_trie_map.is_null() {
+            return None;
+        }
+
+        unsafe {
+            Some(slice::from_raw_parts_mut(
+                self.alpha_to_trie_map,
+                self.alpha_map_sz as usize,
+            ))
+        }
+    }
+
+    fn trie_to_alpha_map_slice(&self) -> Option<&[AlphaChar]> {
+        if self.trie_to_alpha_map.is_null() {
+            return None;
+        }
+
+        unsafe {
+            Some(slice::from_raw_parts(
+                self.trie_to_alpha_map,
+                self.trie_map_sz as usize,
+            ))
+        }
+    }
+
+    fn trie_to_alpha_map_slice_mut(&self) -> Option<&mut [AlphaChar]> {
+        if self.trie_to_alpha_map.is_null() {
+            return None;
+        }
+
+        unsafe {
+            Some(slice::from_raw_parts_mut(
+                self.trie_to_alpha_map,
+                self.trie_map_sz as usize,
+            ))
+        }
+    }
+}
 
 #[no_mangle]
 pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
@@ -183,16 +270,13 @@ pub unsafe extern "C" fn alpha_map_fread_bin(mut file: *mut FILE) -> *mut AlphaM
     return NULL as *mut AlphaMap;
 }
 
-extern "C" fn alpha_map_get_total_ranges(alpha_map: *const AlphaMap) -> i32 {
-    let mut n = 0;
+fn alpha_map_get_total_ranges(alpha_map: *const AlphaMap) -> i32 {
+    let am = unsafe { &*alpha_map };
 
-    let mut range = unsafe { (*alpha_map).first_range };
-    while !range.is_null() {
-        n += 1;
-        range = unsafe { (*range).next };
+    match am.range_iter() {
+        Some(iter) => iter.count() as i32,
+        None => 0,
     }
-
-    n
 }
 
 #[no_mangle]
@@ -224,7 +308,7 @@ pub extern "C" fn alpha_map_get_serialized_size(alpha_map: *const AlphaMap) -> u
 
     return 4 // ALPHAMAP_SIGNATURE
     + size_of::<i32>() // ranges_count
-    + (size_of::<AlphaChar>() * 2 * ranges_count as usize)
+    + (size_of::<AlphaChar>() * 2 * ranges_count as usize);
 }
 
 #[no_mangle]
@@ -459,40 +543,35 @@ pub unsafe extern "C" fn alpha_map_add_range(
     }
     return alpha_map_recalc_work_area(alpha_map);
 }
+
 #[no_mangle]
-pub extern "C" fn alpha_map_char_to_trie(
-    mut alpha_map: *const AlphaMap,
-    mut ac: AlphaChar,
-) -> TrieIndex {
-    let am = unsafe { &*alpha_map };
-    let mut alpha_begin: TrieIndex = 0;
-    if 0 as libc::c_int as AlphaChar == ac {
+pub extern "C" fn alpha_map_char_to_trie(alpha_map: *const AlphaMap, ac: AlphaChar) -> TrieIndex {
+    if ac == 0 {
         return TRIE_CHAR_TERM as TrieIndex;
     }
-    if am.alpha_to_trie_map.is_null() {
-        return TRIE_INDEX_MAX;
+
+    let am = unsafe { &*alpha_map };
+    let alpha_to_trie = match am.alpha_to_trie_map_slice() {
+        Some(v) => v,
+        None => return TRIE_INDEX_MAX,
+    };
+
+    if (am.alpha_begin..=am.alpha_end).contains(&ac) {
+        // TODO: We probably can write better mapping
+        return alpha_to_trie[(ac - am.alpha_begin) as usize];
     }
-    alpha_begin = am.alpha_begin as TrieIndex;
-    if alpha_begin as AlphaChar <= ac && ac <= am.alpha_end {
-        unsafe {
-            return *am.alpha_to_trie_map
-                .offset(ac.wrapping_sub(alpha_begin as AlphaChar) as isize);
-        }
-    }
-    return TRIE_INDEX_MAX;
+
+    TRIE_INDEX_MAX
 }
 
 #[no_mangle]
-pub extern "C" fn alpha_map_trie_to_char(
-    mut alpha_map: *const AlphaMap,
-    mut tc: TrieChar,
-) -> AlphaChar {
-    // TODO: Improve pointer
+pub extern "C" fn alpha_map_trie_to_char(alpha_map: *const AlphaMap, tc: TrieChar) -> AlphaChar {
     let am = unsafe { &(*alpha_map) };
-    if (tc as i32) < am.trie_map_sz {
-        return unsafe { *am.trie_to_alpha_map.offset(tc as isize) }
-    }
-    ALPHA_CHAR_ERROR
+    am.trie_to_alpha_map_slice()
+        .map(|v| v.get(tc as usize))
+        .flatten()
+        .copied()
+        .unwrap_or(ALPHA_CHAR_ERROR)
 }
 
 #[no_mangle]
@@ -502,13 +581,17 @@ pub extern "C" fn alpha_map_char_to_trie_str(
 ) -> *mut TrieChar {
     let str = unsafe { slice::from_raw_parts(str, alpha_char_strlen(str) as usize) };
 
-    let out_vec: Option<Vec<TrieChar>> = str.iter().map(|v| {
-        let tc = alpha_map_char_to_trie(alpha_map, *v);
-        if tc == TRIE_INDEX_MAX {
-            return None
-        }
-        Some(tc as TrieChar)
-    }).chain(iter::once(Some(TRIE_CHAR_TERM))).collect();
+    let out_vec: Option<Vec<TrieChar>> = str
+        .iter()
+        .map(|v| {
+            let tc = alpha_map_char_to_trie(alpha_map, *v);
+            if tc == TRIE_INDEX_MAX {
+                return None;
+            }
+            Some(tc as TrieChar)
+        })
+        .chain(iter::once(Some(TRIE_CHAR_TERM)))
+        .collect();
 
     match out_vec {
         Some(v) => Box::into_raw(v.into_boxed_slice()).cast(),
@@ -517,28 +600,17 @@ pub extern "C" fn alpha_map_char_to_trie_str(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_trie_to_char_str(
-    mut alpha_map: *const AlphaMap,
-    mut str: *const TrieChar,
+pub extern "C" fn alpha_map_trie_to_char_str(
+    alpha_map: *const AlphaMap,
+    str: *const TrieChar,
 ) -> *mut AlphaChar {
-    let mut alpha_str: *mut AlphaChar = 0 as *mut AlphaChar;
-    let mut p: *mut AlphaChar = 0 as *mut AlphaChar;
-    alpha_str = malloc(
-        (trie_char_strlen(str) as libc::c_ulong)
-            .wrapping_add(1)
-            .wrapping_mul(size_of::<AlphaChar>() as libc::c_ulong),
-    ) as *mut AlphaChar;
-    if alpha_str.is_null() {
-        return NULL as *mut AlphaChar;
-    }
-    p = alpha_str;
-    while *str != 0 {
-        *p = alpha_map_trie_to_char(alpha_map, *str);
-        p = p.offset(1);
-        p;
-        str = str.offset(1);
-        str;
-    }
-    *p = 0 as libc::c_int as AlphaChar;
-    return alpha_str;
+    let str = unsafe { slice::from_raw_parts(str, trie_char_strlen(str)) };
+
+    let out: Vec<AlphaChar> = str
+        .iter()
+        .map(|chr| alpha_map_trie_to_char(alpha_map, *chr))
+        .chain(iter::once(0))
+        .collect();
+
+    Box::into_raw(out.into_boxed_slice()).cast()
 }

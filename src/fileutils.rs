@@ -1,8 +1,8 @@
-use std::io::{Read, Write};
 use crate::types::*;
 use ::libc;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 use cstream::BorrowedCStream;
+use std::io::{Read, Write};
 use std::ptr::NonNull;
 use std::slice;
 
@@ -44,7 +44,7 @@ pub extern "C" fn file_write_int32(file: *mut libc::FILE, val: i32) -> Bool {
     };
     match stream.write_i32::<BigEndian>(val) {
         Ok(_) => TRUE,
-        Err(_) => FALSE
+        Err(_) => FALSE,
     }
 }
 
@@ -86,7 +86,7 @@ pub extern "C" fn file_write_int16(file: *mut libc::FILE, val: i16) -> Bool {
     };
     match stream.write_i16::<BigEndian>(val) {
         Ok(_) => TRUE,
-        Err(_) => FALSE
+        Err(_) => FALSE,
     }
 }
 
@@ -113,16 +113,12 @@ pub extern "C" fn file_write_int8(file: *mut libc::FILE, val: i8) -> Bool {
     };
     match stream.write_i8(val) {
         Ok(_) => TRUE,
-        Err(_) => FALSE
+        Err(_) => FALSE,
     }
 }
 
 #[no_mangle]
-pub extern "C" fn file_read_chars(
-    file: *mut libc::FILE,
-    buff: *mut u8,
-    len: i32,
-) -> Bool {
+pub extern "C" fn file_read_chars(file: *mut libc::FILE, buff: *mut u8, len: i32) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -136,11 +132,7 @@ pub extern "C" fn file_read_chars(
 }
 
 #[no_mangle]
-pub extern "C" fn file_write_chars(
-    file: *mut libc::FILE,
-    buff: *const u8,
-    len: i32,
-) -> Bool {
+pub extern "C" fn file_write_chars(file: *mut libc::FILE, buff: *const u8, len: i32) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
