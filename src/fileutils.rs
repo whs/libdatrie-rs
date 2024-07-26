@@ -17,7 +17,7 @@ pub(crate) fn wrap_cfile_nonnull(
 }
 
 #[no_mangle]
-pub extern "C" fn file_read_int32(file: *mut libc::FILE, o_val: *mut i32) -> Bool {
+pub(crate) extern "C" fn file_read_int32(file: *mut libc::FILE, o_val: *mut i32) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -36,14 +36,14 @@ fn serialize_int32_be(buff: &mut [u8], val: i32) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn serialize_int32_be_incr(buff: *mut *mut u8, val: i32) {
+pub(crate) unsafe extern "C" fn serialize_int32_be_incr(buff: *mut *mut u8, val: i32) {
     let write_buf: *mut [u8] = *buff.cast();
     BigEndian::write_i32(&mut *write_buf, val);
     *buff = (*buff).offset(4);
 }
 
 #[no_mangle]
-pub extern "C" fn file_write_int32(file: *mut libc::FILE, val: i32) -> Bool {
+pub(crate) extern "C" fn file_write_int32(file: *mut libc::FILE, val: i32) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -59,7 +59,7 @@ extern "C" fn parse_int16_be(buff: &[u8]) -> i16 {
 }
 
 #[no_mangle]
-pub extern "C" fn file_read_int16(file: *mut libc::FILE, o_val: *mut i16) -> Bool {
+pub(crate) extern "C" fn file_read_int16(file: *mut libc::FILE, o_val: *mut i16) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -78,14 +78,14 @@ fn serialize_int16_be(buff: &mut [u8], val: i16) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn serialize_int16_be_incr(buff: *mut *mut u8, val: i16) {
+pub(crate) unsafe extern "C" fn serialize_int16_be_incr(buff: *mut *mut u8, val: i16) {
     let write_buf: *mut [u8] = *buff.cast();
     BigEndian::write_i16(&mut *write_buf, val);
     *buff = (*buff).offset(2);
 }
 
 #[no_mangle]
-pub extern "C" fn file_write_int16(file: *mut libc::FILE, val: i16) -> Bool {
+pub(crate) extern "C" fn file_write_int16(file: *mut libc::FILE, val: i16) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -97,7 +97,7 @@ pub extern "C" fn file_write_int16(file: *mut libc::FILE, val: i16) -> Bool {
 }
 
 #[no_mangle]
-pub extern "C" fn file_read_int8(file: *mut libc::FILE, o_val: *mut i8) -> Bool {
+pub(crate) extern "C" fn file_read_int8(file: *mut libc::FILE, o_val: *mut i8) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -112,7 +112,7 @@ pub extern "C" fn file_read_int8(file: *mut libc::FILE, o_val: *mut i8) -> Bool 
 }
 
 #[no_mangle]
-pub extern "C" fn file_write_int8(file: *mut libc::FILE, val: i8) -> Bool {
+pub(crate) extern "C" fn file_write_int8(file: *mut libc::FILE, val: i8) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -124,7 +124,7 @@ pub extern "C" fn file_write_int8(file: *mut libc::FILE, val: i8) -> Bool {
 }
 
 #[no_mangle]
-pub extern "C" fn file_read_chars(file: *mut libc::FILE, buff: *mut u8, len: i32) -> Bool {
+pub(crate) extern "C" fn file_read_chars(file: *mut libc::FILE, buff: *mut u8, len: i32) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
@@ -138,7 +138,7 @@ pub extern "C" fn file_read_chars(file: *mut libc::FILE, buff: *mut u8, len: i32
 }
 
 #[no_mangle]
-pub extern "C" fn file_write_chars(file: *mut libc::FILE, buff: *const u8, len: i32) -> Bool {
+pub(crate) extern "C" fn file_write_chars(file: *mut libc::FILE, buff: *const u8, len: i32) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,

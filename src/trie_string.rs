@@ -17,7 +17,6 @@ pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 
 #[no_mangle]
 pub extern "C" fn trie_char_strlen(key: *const TrieChar) -> usize {
-    // TODO: Use memchr
     unsafe { Nul::new_unchecked(key) }.len()
 }
 

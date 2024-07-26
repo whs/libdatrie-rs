@@ -24,7 +24,6 @@ pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;
 
 #[no_mangle]
 pub extern "C" fn alpha_char_strlen(str: *const AlphaChar) -> i32 {
-    // TODO: Use memchr
     unsafe { Nul::new_unchecked(str) }.len() as i32
 }
 
