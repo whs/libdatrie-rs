@@ -1,6 +1,5 @@
 use std::{iter, ptr, slice};
 use std::cmp::Ordering;
-
 use ::libc;
 use null_terminated::Nul;
 
@@ -45,7 +44,6 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
     }
 }
 
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct AlphaMap {
     pub alpha_begin: AlphaChar,
@@ -102,52 +100,57 @@ impl AlphaMap {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
-    let am = AlphaMap {
-        first_range: ptr::null_mut(),
-        alpha_begin: 0,
-        alpha_end: 0,
-        alpha_map_sz: 0,
-        alpha_to_trie_map: ptr::null_mut(),
-        trie_map_sz: 0,
-        trie_to_alpha_map: ptr::null_mut(),
-    };
+impl Default for AlphaMap {
+    fn default() -> Self {
+        AlphaMap {
+            first_range: ptr::null_mut(),
+            alpha_begin: 0,
+            alpha_end: 0,
+            alpha_map_sz: 0,
+            alpha_to_trie_map: ptr::null_mut(),
+            trie_map_sz: 0,
+            trie_to_alpha_map: ptr::null_mut(),
+        }
+    }
+}
 
-    Box::into_raw(Box::new(am))
+impl Clone for AlphaMap {
+    fn clone(&self) -> Self {
+        let mut am = Self::default();
+
+        if let Some(iter) = self.range_iter() {
+            for range in iter {
+                unsafe {
+                    if alpha_map_add_range_only(&mut am, range.begin, range.end) != 0 {
+                        panic!("clone fail")
+                    }
+                }
+            }
+        }
+
+        unsafe {
+            if alpha_map_recalc_work_area(&mut am) != 0 {
+                panic!("clone fail")
+            }
+        }
+
+        am
+    }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_clone(mut a_map: *const AlphaMap) -> *mut AlphaMap {
-    let mut current_block: u64;
-    let mut alpha_map: *mut AlphaMap = 0 as *mut AlphaMap;
-    let mut range: *mut AlphaRange = 0 as *mut AlphaRange;
-    alpha_map = alpha_map_new();
-    if alpha_map.is_null() {
-        return NULL as *mut AlphaMap;
-    }
-    range = (*a_map).first_range;
-    loop {
-        if range.is_null() {
-            current_block = 15619007995458559411;
-            break;
-        }
-        if alpha_map_add_range_only(alpha_map, (*range).begin, (*range).end) != 0 as libc::c_int {
-            current_block = 14813426389682942902;
-            break;
-        }
-        range = (*range).next;
-    }
-    match current_block {
-        15619007995458559411 => {
-            if !(alpha_map_recalc_work_area(alpha_map) != 0 as libc::c_int) {
-                return alpha_map;
-            }
-        }
-        _ => {}
-    }
-    alpha_map_free(alpha_map);
-    return NULL as *mut AlphaMap;
+pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
+    Box::into_raw(Box::new(AlphaMap::default()))
+}
+
+#[no_mangle]
+pub extern "C" fn alpha_map_clone(mut a_map: *const AlphaMap) -> *mut AlphaMap {
+    let am = match unsafe { a_map.as_ref() } {
+        Some(v) => v,
+        None => return ptr::null_mut(),
+    };
+
+    Box::into_raw(Box::new(am.clone()))
 }
 
 #[no_mangle]
@@ -167,7 +170,7 @@ pub unsafe extern "C" fn alpha_map_free(alpha_map: *mut AlphaMap) {
         free(am.trie_to_alpha_map as *mut libc::c_void);
     }
 
-    drop(am) // This is not strictly needed, but it help in clarity
+    drop(am) // This is not strictly needed, but it helps in clarity
 }
 
 #[no_mangle]
