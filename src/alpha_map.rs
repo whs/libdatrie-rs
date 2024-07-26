@@ -43,8 +43,8 @@ pub struct AlphaMap {
     alpha_begin: AlphaChar,
     first_range: *mut AlphaRange,
     alpha_end: AlphaChar,
-    alpha_to_trie_map: Vec<TrieIndex>,
-    trie_to_alpha_map: Vec<AlphaChar>,
+    alpha_to_trie_map: Box<[TrieIndex]>,
+    trie_to_alpha_map: Box<[AlphaChar]>,
 }
 
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
@@ -78,12 +78,7 @@ impl AlphaMap {
         }
 
         // work area
-        if alpha_map_recalc_work_area((&mut alphamap).into()) != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                "alpha_map_recalc_work_area fail",
-            ));
-        }
+        alpha_map_recalc_work_area((&mut alphamap).into());
 
         Ok(alphamap)
     }
@@ -121,8 +116,8 @@ impl Default for AlphaMap {
             first_range: ptr::null_mut(),
             alpha_begin: 0,
             alpha_end: 0,
-            alpha_to_trie_map: Vec::default(),
-            trie_to_alpha_map: Vec::default(),
+            alpha_to_trie_map: Box::new([]),
+            trie_to_alpha_map: Box::new([]),
         }
     }
 }
@@ -141,9 +136,7 @@ impl Clone for AlphaMap {
             }
         }
 
-        if alpha_map_recalc_work_area((&mut am).into()) != 0 {
-            panic!("clone fail")
-        }
+        alpha_map_recalc_work_area((&mut am).into());
 
         am
     }
@@ -334,49 +327,54 @@ unsafe extern "C" fn alpha_map_add_range_only(
     0
 }
 
-extern "C" fn alpha_map_recalc_work_area(mut alpha_map: NonNull<AlphaMap>) -> i32 {
+extern "C" fn alpha_map_recalc_work_area(mut alpha_map: NonNull<AlphaMap>) {
     let am = unsafe { alpha_map.as_mut() };
     // free old existing map
-    am.alpha_to_trie_map.clear();
-    am.trie_to_alpha_map.clear();
+    am.alpha_to_trie_map = Box::new([]);
+    am.trie_to_alpha_map = Box::new([]);
 
     let mut range = am.first_range;
-    if !range.is_null() {
-        // This is basically am.first_range[0].begin
-        let alpha_begin = unsafe { (*range).begin };
-
-        am.alpha_begin = alpha_begin;
-        let mut n_trie: usize = am
-            .range_iter()
-            .unwrap()
-            .map(|range| range.end as usize - range.begin as usize + 1)
-            .sum();
-        if n_trie < TRIE_CHAR_TERM as usize {
-            n_trie = TRIE_CHAR_TERM as usize + 1;
-        } else {
-            n_trie += 1;
-        }
-        am.alpha_end = am.range_iter().unwrap().last().unwrap().end;
-
-        let n_alpha = am.alpha_end as usize - alpha_begin as usize + 1;
-        am.alpha_to_trie_map.resize(n_alpha, TRIE_INDEX_MAX);
-        am.trie_to_alpha_map.resize(n_trie, ALPHA_CHAR_ERROR);
-
-        let mut trie_char: TrieIndex = 0;
-        for range in unsafe { *am.first_range }.iter() {
-            for a in range.begin..=range.end {
-                if trie_char == TRIE_CHAR_TERM as TrieIndex {
-                    trie_char += 1;
-                }
-                am.alpha_to_trie_map[(a - alpha_begin) as usize] = trie_char as TrieIndex;
-                am.trie_to_alpha_map[trie_char as usize] = a;
-                trie_char += 1;
-            }
-        }
-        am.trie_to_alpha_map[TRIE_CHAR_TERM as usize] = 0;
+    if range.is_null() {
+        return;
     }
 
-    0
+    // This is basically am.first_range[0].begin
+    let alpha_begin = unsafe { (*range).begin };
+
+    am.alpha_begin = alpha_begin;
+    let mut n_trie: usize = am
+        .range_iter()
+        .unwrap()
+        .map(|range| range.end as usize - range.begin as usize + 1)
+        .sum();
+    if n_trie < TRIE_CHAR_TERM as usize { // does this even hit? overflow handling?
+        n_trie = TRIE_CHAR_TERM as usize + 1;
+    } else {
+        n_trie += 1;
+    }
+    am.alpha_end = am.range_iter().unwrap().last().unwrap().end;
+
+    let n_alpha = am.alpha_end as usize - alpha_begin as usize + 1;
+
+    let mut alpha_to_trie_map = vec![TRIE_INDEX_MAX; n_alpha].into_boxed_slice();
+    let mut trie_to_alpha_map = vec![ALPHA_CHAR_ERROR; n_trie].into_boxed_slice();
+
+    let mut trie_char: TrieIndex = 0;
+    for range in unsafe { *am.first_range }.iter() {
+        for a in range.begin..=range.end {
+            if trie_char == TRIE_CHAR_TERM as TrieIndex {
+                trie_char += 1;
+            }
+            // This does bond check every loop iteration...
+            alpha_to_trie_map[(a - alpha_begin) as usize] = trie_char as TrieIndex;
+            trie_to_alpha_map[trie_char as usize] = a;
+            trie_char += 1;
+        }
+    }
+    trie_to_alpha_map[TRIE_CHAR_TERM as usize] = 0;
+
+    am.alpha_to_trie_map = alpha_to_trie_map;
+    am.trie_to_alpha_map = trie_to_alpha_map;
 }
 
 #[no_mangle]
@@ -389,7 +387,9 @@ pub extern "C" fn alpha_map_add_range(
     if res != 0 {
         return res;
     }
-    alpha_map_recalc_work_area(alpha_map)
+    alpha_map_recalc_work_area(alpha_map);
+
+    0
 }
 
 #[no_mangle]
