@@ -209,7 +209,7 @@ fn alpha_map_get_total_ranges(alpha_map: *const AlphaMap) -> i32 {
 
 #[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub extern "C" fn alpha_map_fwrite_bin(alpha_map: *const AlphaMap, file: NonNull<libc::FILE>) -> i32 {
+pub(crate) extern "C" fn alpha_map_fwrite_bin(alpha_map: *const AlphaMap, file: NonNull<libc::FILE>) -> i32 {
     let mut file = wrap_cfile_nonnull(file);
 
     let am = unsafe { &*alpha_map };
@@ -230,7 +230,7 @@ pub(crate) extern "C" fn alpha_map_get_serialized_size(alpha_map: *const AlphaMa
 
 #[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_serialize_bin(alpha_map: *const AlphaMap, mut ptr: NonNull<NonNull<[u8]>>) {
+pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(alpha_map: *const AlphaMap, mut ptr: NonNull<NonNull<[u8]>>) {
     let mut cursor = Cursor::new(ptr.as_mut().as_mut());
     (*alpha_map).serialize(&mut cursor).unwrap();
     // Move ptr

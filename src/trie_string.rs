@@ -1,3 +1,4 @@
+use std::ffi::CStr;
 use std::slice;
 
 use ::libc;
@@ -70,8 +71,8 @@ pub extern "C" fn trie_string_append(dst: *mut TrieString, src: *const TrieStrin
 #[no_mangle]
 pub extern "C" fn trie_string_append_string(ts: *mut TrieString, str: *const TrieChar) -> Bool {
     // In the C version this use strlen()
-    let len = unsafe { Nul::new_unchecked(str).len() as i32 };
-    dstring_append_string(ts.cast(), str.cast(), len)
+    let len = (unsafe { CStr::from_ptr(str.cast()) }).count_bytes();
+    dstring_append_string(ts.cast(), str.cast(), len as i32)
 }
 #[no_mangle]
 pub extern "C" fn trie_string_append_char(ts: *mut TrieString, tc: TrieChar) -> Bool {
