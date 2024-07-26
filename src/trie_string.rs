@@ -1,7 +1,7 @@
+use std::slice;
+
 use ::libc;
 use null_terminated::Nul;
-use std::ffi::CStr;
-use std::slice;
 
 use crate::dstring::*;
 use crate::types::*;

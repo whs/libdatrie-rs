@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::ptr::NonNull;
 use std::slice;
 
-fn wrap_cfile(file: *mut libc::FILE) -> Option<cstream::Io<BorrowedCStream<'static>>> {
+pub(crate) fn wrap_cfile(file: *mut libc::FILE) -> Option<cstream::Io<BorrowedCStream<'static>>> {
     NonNull::new(file).map(|file| unsafe { cstream::Io(BorrowedCStream::borrow_raw(file)) })
 }
 

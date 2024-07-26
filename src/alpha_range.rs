@@ -10,14 +10,14 @@ pub struct AlphaRange {
 }
 
 impl AlphaRange {
-    pub fn iter(&self) -> impl Iterator<Item = &AlphaRange> {
+    pub fn iter(&self) -> AlphaRangeIter {
         AlphaRangeIter {
             range: self,
             phantom: PhantomData,
         }
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut AlphaRange> {
+    pub fn iter_mut(&mut self) -> AlphaRangeIterMut {
         AlphaRangeIterMut {
             range: self,
             phantom: PhantomData,
@@ -25,7 +25,7 @@ impl AlphaRange {
     }
 }
 
-struct AlphaRangeIter<'a> {
+pub struct AlphaRangeIter<'a> {
     range: *const AlphaRange,
     phantom: PhantomData<&'a AlphaRange>,
 }
@@ -42,7 +42,7 @@ impl<'a> Iterator for AlphaRangeIter<'a> {
     }
 }
 
-struct AlphaRangeIterMut<'a> {
+pub struct AlphaRangeIterMut<'a> {
     range: *mut AlphaRange,
     phantom: PhantomData<&'a AlphaRange>,
 }
