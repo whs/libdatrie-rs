@@ -13,7 +13,6 @@ extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
 }
-pub const NULL: libc::c_int = 0 as libc::c_int;
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
@@ -46,8 +45,7 @@ pub struct AlphaMap {
     first_range: *mut AlphaRange,
     alpha_end: AlphaChar,
     alpha_to_trie_map: Vec<TrieIndex>,
-    trie_map_sz: i32,
-    trie_to_alpha_map: *mut AlphaChar,
+    trie_to_alpha_map: Vec<AlphaChar>,
 }
 
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
@@ -105,22 +103,6 @@ impl AlphaMap {
         self.range_iter().map(|iter| iter.count()).unwrap_or(0)
     }
 
-    fn trie_to_alpha_map_slice(&self) -> Option<&[AlphaChar]> {
-        unsafe {
-            self.trie_to_alpha_map
-                .as_ref()
-                .map(|v| slice::from_raw_parts(v, self.trie_map_sz as usize))
-        }
-    }
-
-    fn trie_to_alpha_map_slice_mut(&self) -> Option<&mut [AlphaChar]> {
-        unsafe {
-            self.trie_to_alpha_map
-                .as_mut()
-                .map(|v| slice::from_raw_parts_mut(v, self.trie_map_sz as usize))
-        }
-    }
-
     fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
         buf.write_u32::<BigEndian>(ALPHAMAP_SIGNATURE)?;
         buf.write_i32::<BigEndian>(self.total_range() as i32)?;
@@ -143,8 +125,7 @@ impl Default for AlphaMap {
             alpha_begin: 0,
             alpha_end: 0,
             alpha_to_trie_map: Vec::default(),
-            trie_map_sz: 0,
-            trie_to_alpha_map: ptr::null_mut(),
+            trie_to_alpha_map: Vec::default(),
         }
     }
 }
@@ -181,9 +162,6 @@ impl Drop for AlphaMap {
                 let q = (*p).next;
                 free(p as *mut libc::c_void);
                 p = q;
-            }
-            if !self.trie_to_alpha_map.is_null() {
-                free(self.trie_to_alpha_map as *mut libc::c_void);
             }
         }
     }
@@ -372,10 +350,7 @@ unsafe extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> lib
 
     // free old existing map
     (*alpha_map).alpha_to_trie_map.clear();
-    if !((*alpha_map).trie_to_alpha_map).is_null() {
-        free((*alpha_map).trie_to_alpha_map as *mut libc::c_void);
-        (*alpha_map).trie_to_alpha_map = NULL as *mut AlphaChar;
-    }
+    (*alpha_map).trie_to_alpha_map.clear();
 
     range = (*alpha_map).first_range;
     if !range.is_null() {
@@ -410,13 +385,8 @@ unsafe extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> lib
             .wrapping_sub(alpha_begin)
             .wrapping_add(1 as libc::c_int as AlphaChar) as libc::c_int;
         (*alpha_map).alpha_to_trie_map.resize(n_alpha as usize, TRIE_INDEX_MAX);
-        i = 0 as libc::c_int;
 
-        (*alpha_map).trie_map_sz = n_trie;
-        (*alpha_map).trie_to_alpha_map = malloc(
-            (n_trie as libc::c_ulong)
-                .wrapping_mul(size_of::<AlphaChar>() as libc::c_ulong),
-        ) as *mut AlphaChar;
+        (*alpha_map).trie_to_alpha_map.resize(n_trie as usize, ALPHA_CHAR_ERROR);
 
         trie_char = 0 as libc::c_int;
         range = (*alpha_map).first_range;
@@ -429,7 +399,7 @@ unsafe extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> lib
                 }
                 // TODO: Elide bond check
                 (*alpha_map).alpha_to_trie_map[(a - alpha_begin) as usize] = trie_char;
-                *((*alpha_map).trie_to_alpha_map).offset(trie_char as isize) = a;
+                (*alpha_map).trie_to_alpha_map[trie_char as usize] = a;
                 trie_char += 1;
                 trie_char;
                 a = a.wrapping_add(1);
@@ -437,13 +407,7 @@ unsafe extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> lib
             }
             range = (*range).next;
         }
-        while trie_char < n_trie {
-            let fresh0 = trie_char;
-            trie_char = trie_char + 1;
-            *((*alpha_map).trie_to_alpha_map).offset(fresh0 as isize) = ALPHA_CHAR_ERROR;
-        }
-        *((*alpha_map).trie_to_alpha_map).offset(TRIE_CHAR_TERM as isize) =
-            0 as libc::c_int as AlphaChar;
+        (*alpha_map).trie_to_alpha_map[TRIE_CHAR_TERM as usize] = 0;
         current_block = 572715077006366937;
         match current_block {
             572715077006366937 => {}
@@ -490,11 +454,7 @@ pub(crate) extern "C" fn alpha_map_trie_to_char(
     tc: TrieChar,
 ) -> AlphaChar {
     let am = unsafe { &(*alpha_map) };
-    am.trie_to_alpha_map_slice()
-        .map(|v| v.get(tc as usize))
-        .flatten()
-        .copied()
-        .unwrap_or(ALPHA_CHAR_ERROR)
+    am.trie_to_alpha_map.get(tc as usize).copied().unwrap_or(ALPHA_CHAR_ERROR)
 }
 
 #[no_mangle]
