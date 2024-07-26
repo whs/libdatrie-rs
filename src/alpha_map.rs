@@ -1,13 +1,15 @@
+use std::{io, iter, ptr, slice};
+use std::cmp::Ordering;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::ptr::NonNull;
+
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use null_terminated::Nul;
-use std::cmp::Ordering;
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use std::{io, iter, ptr, slice};
 
 use crate::alpha_range::{AlphaRange, AlphaRangeIter, AlphaRangeIterMut};
-use crate::fileutils::wrap_cfile;
-use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
+use crate::fileutils::wrap_cfile_nonnull;
+use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -19,8 +21,6 @@ pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
 
 pub type AlphaChar = u32;
 pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;
-
-// TODO: Check whether the input is required or not, and change type accordingly
 
 #[no_mangle]
 pub extern "C" fn alpha_char_strlen(str: *const AlphaChar) -> i32 {
@@ -79,7 +79,7 @@ impl AlphaMap {
         }
 
         // work area
-        if alpha_map_recalc_work_area(&mut alphamap) != 0 {
+        if alpha_map_recalc_work_area((&mut alphamap).into()) != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::OutOfMemory,
                 "alpha_map_recalc_work_area fail",
@@ -142,7 +142,7 @@ impl Clone for AlphaMap {
             }
         }
 
-        if alpha_map_recalc_work_area(&mut am) != 0 {
+        if alpha_map_recalc_work_area((&mut am).into()) != 0 {
             panic!("clone fail")
         }
 
@@ -181,18 +181,15 @@ pub extern "C" fn alpha_map_clone(mut a_map: *const AlphaMap) -> *mut AlphaMap {
 
 #[deprecated(note = "Just drop alpha_map")]
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_free(alpha_map: *mut AlphaMap) {
-    let am = Box::from_raw(alpha_map);
+pub unsafe extern "C" fn alpha_map_free(mut alpha_map: NonNull<AlphaMap>) {
+    let am = Box::from_raw(alpha_map.as_mut());
     drop(am) // This is not strictly needed, but it helps in clarity
 }
 
 #[deprecated(note = "Use AlphaMap::read(). Careful about file position on failure!")]
 #[no_mangle]
-pub(crate) extern "C" fn alpha_map_fread_bin(file: *mut libc::FILE) -> *mut AlphaMap {
-    let Some(mut file) = wrap_cfile(file) else {
-        return ptr::null_mut();
-    };
-
+pub(crate) extern "C" fn alpha_map_fread_bin(file: NonNull<libc::FILE>) -> *mut AlphaMap {
+    let mut file = wrap_cfile_nonnull(file);
     let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
 
     match AlphaMap::read(&mut file) {
@@ -213,10 +210,8 @@ fn alpha_map_get_total_ranges(alpha_map: *const AlphaMap) -> i32 {
 
 #[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub extern "C" fn alpha_map_fwrite_bin(alpha_map: *const AlphaMap, file: *mut libc::FILE) -> i32 {
-    let Some(mut file) = wrap_cfile(file) else {
-        return -1;
-    };
+pub extern "C" fn alpha_map_fwrite_bin(alpha_map: *const AlphaMap, file: NonNull<libc::FILE>) -> i32 {
+    let mut file = wrap_cfile_nonnull(file);
 
     let am = unsafe { &*alpha_map };
 
@@ -236,11 +231,11 @@ pub(crate) extern "C" fn alpha_map_get_serialized_size(alpha_map: *const AlphaMa
 
 #[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_serialize_bin(alpha_map: *const AlphaMap, ptr: *mut *mut [u8]) {
-    let mut cursor = Cursor::new(&mut **ptr);
+pub unsafe extern "C" fn alpha_map_serialize_bin(alpha_map: *const AlphaMap, mut ptr: NonNull<NonNull<[u8]>>) {
+    let mut cursor = Cursor::new(ptr.as_mut().as_mut());
     (*alpha_map).serialize(&mut cursor).unwrap();
     // Move ptr
-    *ptr = (*ptr).byte_offset(cursor.position() as isize);
+    ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 }
 
 unsafe extern "C" fn alpha_map_add_range_only(
@@ -340,9 +335,8 @@ unsafe extern "C" fn alpha_map_add_range_only(
     0
 }
 
-extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> i32 {
-    let am = unsafe { &mut *alpha_map };
-
+extern "C" fn alpha_map_recalc_work_area(mut alpha_map: NonNull<AlphaMap>) -> i32 {
+    let am = unsafe { alpha_map.as_mut() };
     // free old existing map
     am.alpha_to_trie_map.clear();
     am.trie_to_alpha_map.clear();
@@ -353,7 +347,11 @@ extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> i32 {
         let alpha_begin = unsafe { (*range).begin };
 
         am.alpha_begin = alpha_begin;
-        let mut n_trie: usize = am.range_iter().unwrap().map(|range| range.end as usize - range.begin as usize + 1).sum();
+        let mut n_trie: usize = am
+            .range_iter()
+            .unwrap()
+            .map(|range| range.end as usize - range.begin as usize + 1)
+            .sum();
         if n_trie < TRIE_CHAR_TERM as usize {
             n_trie = TRIE_CHAR_TERM as usize + 1;
         } else {
@@ -384,11 +382,11 @@ extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> i32 {
 
 #[no_mangle]
 pub extern "C" fn alpha_map_add_range(
-    alpha_map: *mut AlphaMap,
+    mut alpha_map: NonNull<AlphaMap>,
     begin: AlphaChar,
     end: AlphaChar,
 ) -> i32 {
-    let res = unsafe { alpha_map_add_range_only(alpha_map, begin, end) };
+    let res = unsafe { alpha_map_add_range_only(alpha_map.as_mut(), begin, end) };
     if res != 0 {
         return res;
     }
@@ -407,7 +405,11 @@ pub(crate) extern "C" fn alpha_map_char_to_trie(
     let am = unsafe { &*alpha_map };
 
     if (am.alpha_begin..=am.alpha_end).contains(&ac) {
-        return am.alpha_to_trie_map.get((ac - am.alpha_begin) as usize).copied().unwrap_or(TRIE_INDEX_MAX);
+        return am
+            .alpha_to_trie_map
+            .get((ac - am.alpha_begin) as usize)
+            .copied()
+            .unwrap_or(TRIE_INDEX_MAX);
     }
 
     TRIE_INDEX_MAX
@@ -419,7 +421,10 @@ pub(crate) extern "C" fn alpha_map_trie_to_char(
     tc: TrieChar,
 ) -> AlphaChar {
     let am = unsafe { &(*alpha_map) };
-    am.trie_to_alpha_map.get(tc as usize).copied().unwrap_or(ALPHA_CHAR_ERROR)
+    am.trie_to_alpha_map
+        .get(tc as usize)
+        .copied()
+        .unwrap_or(ALPHA_CHAR_ERROR)
 }
 
 #[no_mangle]
@@ -451,7 +456,7 @@ pub(crate) extern "C" fn alpha_map_char_to_trie_str(
 pub(crate) extern "C" fn alpha_map_trie_to_char_str(
     alpha_map: *const AlphaMap,
     str: *const TrieChar,
-) -> *mut AlphaChar {
+) -> NonNull<AlphaChar> {
     let str = unsafe { slice::from_raw_parts(str, trie_char_strlen(str)) };
 
     let out: Vec<AlphaChar> = str
@@ -460,5 +465,7 @@ pub(crate) extern "C" fn alpha_map_trie_to_char_str(
         .chain(iter::once(0))
         .collect();
 
-    Box::into_raw(out.into_boxed_slice()).cast()
+    unsafe {
+        NonNull::new_unchecked(Box::into_raw(out.into_boxed_slice()).cast())
+    }
 }

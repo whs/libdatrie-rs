@@ -10,6 +10,12 @@ pub(crate) fn wrap_cfile(file: *mut libc::FILE) -> Option<cstream::Io<BorrowedCS
     NonNull::new(file).map(|file| unsafe { cstream::Io(BorrowedCStream::borrow_raw(file)) })
 }
 
+pub(crate) fn wrap_cfile_nonnull(
+    file: NonNull<libc::FILE>,
+) -> cstream::Io<BorrowedCStream<'static>> {
+    unsafe { cstream::Io(BorrowedCStream::borrow_raw(file)) }
+}
+
 #[no_mangle]
 pub extern "C" fn file_read_int32(file: *mut libc::FILE, o_val: *mut i32) -> Bool {
     let mut stream = match wrap_cfile(file) {
