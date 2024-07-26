@@ -1,7 +1,7 @@
-use std::{io, iter, ptr, slice};
 use std::cmp::Ordering;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
+use std::{io, iter, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -9,7 +9,7 @@ use null_terminated::Nul;
 
 use crate::alpha_range::{AlphaRange, AlphaRangeIter, AlphaRangeIterMut};
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
+use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -73,7 +73,7 @@ impl AlphaMap {
             let b = stream.read_i32::<BigEndian>()?;
             let e = stream.read_i32::<BigEndian>()?;
             unsafe {
-                alpha_map_add_range_only(&mut alphamap, b as AlphaChar, e as AlphaChar);
+                alpha_map_add_range_only((&mut alphamap).into(), b as AlphaChar, e as AlphaChar);
             }
         }
 
@@ -129,7 +129,7 @@ impl Clone for AlphaMap {
         if let Some(iter) = self.range_iter() {
             for range in iter {
                 unsafe {
-                    if alpha_map_add_range_only(&mut am, range.begin, range.end) != 0 {
+                    if alpha_map_add_range_only((&mut am).into(), range.begin, range.end) != 0 {
                         panic!("clone fail")
                     }
                 }
@@ -202,7 +202,10 @@ fn alpha_map_get_total_ranges(alpha_map: *const AlphaMap) -> i32 {
 
 #[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub(crate) extern "C" fn alpha_map_fwrite_bin(alpha_map: *const AlphaMap, file: NonNull<libc::FILE>) -> i32 {
+pub(crate) extern "C" fn alpha_map_fwrite_bin(
+    alpha_map: *const AlphaMap,
+    file: NonNull<libc::FILE>,
+) -> i32 {
     let mut file = wrap_cfile_nonnull(file);
 
     let am = unsafe { &*alpha_map };
@@ -223,7 +226,10 @@ pub(crate) extern "C" fn alpha_map_get_serialized_size(alpha_map: *const AlphaMa
 
 #[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(alpha_map: *const AlphaMap, mut ptr: NonNull<NonNull<[u8]>>) {
+pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(
+    alpha_map: *const AlphaMap,
+    mut ptr: NonNull<NonNull<[u8]>>,
+) {
     let mut cursor = Cursor::new(ptr.as_mut().as_mut());
     (*alpha_map).serialize(&mut cursor).unwrap();
     // Move ptr
@@ -231,46 +237,56 @@ pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(alpha_map: *const AlphaM
 }
 
 unsafe extern "C" fn alpha_map_add_range_only(
-    alpha_map: *mut AlphaMap,
+    mut alpha_map: NonNull<AlphaMap>,
     begin: AlphaChar,
     end: AlphaChar,
-) -> libc::c_int {
+) -> i32 {
     if begin > end {
         return -1;
     }
     let mut begin_node = 0 as *mut AlphaRange;
     let mut end_node = 0 as *mut AlphaRange;
     let mut q = 0 as *mut AlphaRange;
-    let mut r = (*alpha_map).first_range;
+    let mut r = alpha_map.as_mut().first_range;
+    // Skip first ranges till 'begin' is covered
     while !r.is_null() && (*r).begin <= begin {
         if begin <= (*r).end {
+            // 'r' covers 'begin' -> take 'r' as beginning point
             begin_node = r;
             break;
         } else if (*r).end + 1 == begin {
+            // 'begin' is next to 'r'-end
+            // -> extend 'r'-end to cover 'begin'
             (*r).end = begin;
             begin_node = r;
             break;
-        } else {
-            q = r;
-            r = (*r).next;
         }
+
+        q = r;
+        r = (*r).next;
     }
     if begin_node.is_null() && !r.is_null() && (*r).begin <= end + 1 {
+        // ['begin', 'end'] overlaps into 'r'-begin
+        // or 'r' is next to 'end' if r->begin == end + 1
+        // -> extend 'r'-begin to include the range
         (*r).begin = begin;
         begin_node = r;
     }
+    // Run upto the first range that exceeds 'end'
     while !r.is_null() && (*r).begin <= end + 1 {
         if end <= (*r).end {
+            // 'r' covers 'end' -> take 'r' as ending point
             end_node = r;
         } else if r != begin_node {
+            // ['begin', 'end'] covers the whole 'r' -> remove 'r'
             if !q.is_null() {
                 (*q).next = (*r).next;
                 free(r as *mut libc::c_void);
                 r = (*q).next;
             } else {
-                (*alpha_map).first_range = (*r).next;
+                alpha_map.as_mut().first_range = (*r).next;
                 free(r as *mut libc::c_void);
-                r = (*alpha_map).first_range;
+                r = alpha_map.as_ref().first_range;
             }
             continue;
         }
@@ -278,52 +294,41 @@ unsafe extern "C" fn alpha_map_add_range_only(
         r = (*r).next;
     }
     if end_node.is_null() && !q.is_null() && begin <= (*q).end {
+        // ['begin', 'end'] overlaps 'q' at the end
+        // -> extend 'q'-end to include the range
         (*q).end = end;
         end_node = q;
     }
     if !begin_node.is_null() && !end_node.is_null() {
         if begin_node != end_node {
-            if (*begin_node).next == end_node {
-            } else {
-                // __assert_fail(
-                //     b"begin_node->next == end_node\0" as *const u8 as *const libc::c_char,
-                //     b"../datrie/alpha-map.c\0" as *const u8 as *const libc::c_char,
-                //     396 as libc::c_int as libc::c_uint,
-                //     __ASSERT_FUNCTION.as_ptr(),
-                // );
-                panic!("Assert_fail")
-            }
-            'c_2743: {
-                if (*begin_node).next == end_node {
-                } else {
-                    // __assert_fail(
-                    //     b"begin_node->next == end_node\0" as *const u8 as *const libc::c_char,
-                    //     b"../datrie/alpha-map.c\0" as *const u8 as *const libc::c_char,
-                    //     396 as libc::c_int as libc::c_uint,
-                    //     __ASSERT_FUNCTION.as_ptr(),
-                    // );
-                    panic!("Assert_fail")
-                }
-            };
+            // Merge begin_node and end_node ranges together
+            assert_eq!((*begin_node).next, end_node);
             (*begin_node).end = (*end_node).end;
             (*begin_node).next = (*end_node).next;
             free(end_node as *mut libc::c_void);
         }
     } else if begin_node.is_null() && end_node.is_null() {
+        // ['begin', 'end'] overlaps with none of the ranges
+        // -> insert a new range
         let mut range: *mut AlphaRange =
             malloc(size_of::<AlphaRange>() as libc::c_ulong) as *mut AlphaRange;
+
         if range.is_null() {
             return -1;
         }
+
         (*range).begin = begin;
         (*range).end = end;
+
+        // insert it between 'q' and 'r'
         if !q.is_null() {
             (*q).next = range;
         } else {
-            (*alpha_map).first_range = range;
+            alpha_map.as_mut().first_range = range;
         }
         (*range).next = r;
     }
+
     0
 }
 
@@ -347,7 +352,8 @@ extern "C" fn alpha_map_recalc_work_area(mut alpha_map: NonNull<AlphaMap>) {
         .unwrap()
         .map(|range| range.end as usize - range.begin as usize + 1)
         .sum();
-    if n_trie < TRIE_CHAR_TERM as usize { // does this even hit? overflow handling?
+    if n_trie < TRIE_CHAR_TERM as usize {
+        // does this even hit? overflow handling?
         n_trie = TRIE_CHAR_TERM as usize + 1;
     } else {
         n_trie += 1;
@@ -383,7 +389,7 @@ pub extern "C" fn alpha_map_add_range(
     begin: AlphaChar,
     end: AlphaChar,
 ) -> i32 {
-    let res = unsafe { alpha_map_add_range_only(alpha_map.as_mut(), begin, end) };
+    let res = unsafe { alpha_map_add_range_only(alpha_map, begin, end) };
     if res != 0 {
         return res;
     }
@@ -464,7 +470,5 @@ pub(crate) extern "C" fn alpha_map_trie_to_char_str(
         .chain(iter::once(0))
         .collect();
 
-    unsafe {
-        NonNull::new_unchecked(Box::into_raw(out.into_boxed_slice()).cast())
-    }
+    unsafe { NonNull::new_unchecked(Box::into_raw(out.into_boxed_slice()).cast()) }
 }

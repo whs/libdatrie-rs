@@ -138,7 +138,11 @@ pub(crate) extern "C" fn file_read_chars(file: *mut libc::FILE, buff: *mut u8, l
 }
 
 #[no_mangle]
-pub(crate) extern "C" fn file_write_chars(file: *mut libc::FILE, buff: *const u8, len: i32) -> Bool {
+pub(crate) extern "C" fn file_write_chars(
+    file: *mut libc::FILE,
+    buff: *const u8,
+    len: i32,
+) -> Bool {
     let mut stream = match wrap_cfile(file) {
         Some(v) => v,
         None => return FALSE,
