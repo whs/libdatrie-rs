@@ -45,8 +45,7 @@ pub struct AlphaMap {
     alpha_begin: AlphaChar,
     first_range: *mut AlphaRange,
     alpha_end: AlphaChar,
-    alpha_map_sz: i32,
-    alpha_to_trie_map: *mut TrieIndex,
+    alpha_to_trie_map: Vec<TrieIndex>,
     trie_map_sz: i32,
     trie_to_alpha_map: *mut AlphaChar,
 }
@@ -106,22 +105,6 @@ impl AlphaMap {
         self.range_iter().map(|iter| iter.count()).unwrap_or(0)
     }
 
-    fn alpha_to_trie_map_slice(&self) -> Option<&[TrieIndex]> {
-        unsafe {
-            self.alpha_to_trie_map
-                .as_ref()
-                .map(|v| slice::from_raw_parts(v, self.alpha_map_sz as usize))
-        }
-    }
-
-    fn alpha_to_trie_map_slice_mut(&self) -> Option<&mut [TrieIndex]> {
-        unsafe {
-            self.alpha_to_trie_map
-                .as_mut()
-                .map(|v| slice::from_raw_parts_mut(v, self.alpha_map_sz as usize))
-        }
-    }
-
     fn trie_to_alpha_map_slice(&self) -> Option<&[AlphaChar]> {
         unsafe {
             self.trie_to_alpha_map
@@ -159,8 +142,7 @@ impl Default for AlphaMap {
             first_range: ptr::null_mut(),
             alpha_begin: 0,
             alpha_end: 0,
-            alpha_map_sz: 0,
-            alpha_to_trie_map: ptr::null_mut(),
+            alpha_to_trie_map: Vec::default(),
             trie_map_sz: 0,
             trie_to_alpha_map: ptr::null_mut(),
         }
@@ -199,9 +181,6 @@ impl Drop for AlphaMap {
                 let q = (*p).next;
                 free(p as *mut libc::c_void);
                 p = q;
-            }
-            if !self.alpha_to_trie_map.is_null() {
-                free(self.alpha_to_trie_map as *mut libc::c_void);
             }
             if !self.trie_to_alpha_map.is_null() {
                 free(self.trie_to_alpha_map as *mut libc::c_void);
@@ -387,17 +366,17 @@ unsafe extern "C" fn alpha_map_add_range_only(
     0
 }
 
-unsafe extern "C" fn alpha_map_recalc_work_area(mut alpha_map: *mut AlphaMap) -> libc::c_int {
+unsafe extern "C" fn alpha_map_recalc_work_area(alpha_map: *mut AlphaMap) -> libc::c_int {
     let mut current_block: u64;
     let mut range: *mut AlphaRange = 0 as *mut AlphaRange;
-    if !((*alpha_map).alpha_to_trie_map).is_null() {
-        free((*alpha_map).alpha_to_trie_map as *mut libc::c_void);
-        (*alpha_map).alpha_to_trie_map = NULL as *mut TrieIndex;
-    }
+
+    // free old existing map
+    (*alpha_map).alpha_to_trie_map.clear();
     if !((*alpha_map).trie_to_alpha_map).is_null() {
         free((*alpha_map).trie_to_alpha_map as *mut libc::c_void);
         (*alpha_map).trie_to_alpha_map = NULL as *mut AlphaChar;
     }
+
     range = (*alpha_map).first_range;
     if !range.is_null() {
         let alpha_begin: AlphaChar = (*range).begin;
@@ -426,62 +405,46 @@ unsafe extern "C" fn alpha_map_recalc_work_area(mut alpha_map: *mut AlphaMap) ->
             n_trie;
         }
         (*alpha_map).alpha_end = (*range).end;
+
         n_alpha = ((*range).end)
             .wrapping_sub(alpha_begin)
             .wrapping_add(1 as libc::c_int as AlphaChar) as libc::c_int;
-        (*alpha_map).alpha_map_sz = n_alpha;
-        (*alpha_map).alpha_to_trie_map = malloc(
-            (n_alpha as libc::c_ulong)
-                .wrapping_mul(::core::mem::size_of::<TrieIndex>() as libc::c_ulong),
-        ) as *mut TrieIndex;
-        if ((*alpha_map).alpha_to_trie_map).is_null() {
-            current_block = 1868236917207382637;
-        } else {
-            i = 0 as libc::c_int;
-            while i < n_alpha {
-                *((*alpha_map).alpha_to_trie_map).offset(i as isize) = TRIE_INDEX_MAX;
-                i += 1;
-                i;
-            }
-            (*alpha_map).trie_map_sz = n_trie;
-            (*alpha_map).trie_to_alpha_map = malloc(
-                (n_trie as libc::c_ulong)
-                    .wrapping_mul(::core::mem::size_of::<AlphaChar>() as libc::c_ulong),
-            ) as *mut AlphaChar;
-            if ((*alpha_map).trie_to_alpha_map).is_null() {
-                free((*alpha_map).alpha_to_trie_map as *mut libc::c_void);
-                (*alpha_map).alpha_to_trie_map = NULL as *mut TrieIndex;
-                current_block = 1868236917207382637;
-            } else {
-                trie_char = 0 as libc::c_int;
-                range = (*alpha_map).first_range;
-                while !range.is_null() {
-                    a = (*range).begin;
-                    while a <= (*range).end {
-                        if TRIE_CHAR_TERM as TrieIndex == trie_char {
-                            trie_char += 1;
-                            trie_char;
-                        }
-                        *((*alpha_map).alpha_to_trie_map)
-                            .offset(a.wrapping_sub(alpha_begin) as isize) = trie_char;
-                        *((*alpha_map).trie_to_alpha_map).offset(trie_char as isize) = a;
-                        trie_char += 1;
-                        trie_char;
-                        a = a.wrapping_add(1);
-                        a;
-                    }
-                    range = (*range).next;
+        (*alpha_map).alpha_to_trie_map.resize(n_alpha as usize, TRIE_INDEX_MAX);
+        i = 0 as libc::c_int;
+
+        (*alpha_map).trie_map_sz = n_trie;
+        (*alpha_map).trie_to_alpha_map = malloc(
+            (n_trie as libc::c_ulong)
+                .wrapping_mul(size_of::<AlphaChar>() as libc::c_ulong),
+        ) as *mut AlphaChar;
+
+        trie_char = 0 as libc::c_int;
+        range = (*alpha_map).first_range;
+        while !range.is_null() {
+            a = (*range).begin;
+            while a <= (*range).end {
+                if TRIE_CHAR_TERM as TrieIndex == trie_char {
+                    trie_char += 1;
+                    trie_char;
                 }
-                while trie_char < n_trie {
-                    let fresh0 = trie_char;
-                    trie_char = trie_char + 1;
-                    *((*alpha_map).trie_to_alpha_map).offset(fresh0 as isize) = ALPHA_CHAR_ERROR;
-                }
-                *((*alpha_map).trie_to_alpha_map).offset(TRIE_CHAR_TERM as isize) =
-                    0 as libc::c_int as AlphaChar;
-                current_block = 572715077006366937;
+                // TODO: Elide bond check
+                (*alpha_map).alpha_to_trie_map[(a - alpha_begin) as usize] = trie_char;
+                *((*alpha_map).trie_to_alpha_map).offset(trie_char as isize) = a;
+                trie_char += 1;
+                trie_char;
+                a = a.wrapping_add(1);
+                a;
             }
+            range = (*range).next;
         }
+        while trie_char < n_trie {
+            let fresh0 = trie_char;
+            trie_char = trie_char + 1;
+            *((*alpha_map).trie_to_alpha_map).offset(fresh0 as isize) = ALPHA_CHAR_ERROR;
+        }
+        *((*alpha_map).trie_to_alpha_map).offset(TRIE_CHAR_TERM as isize) =
+            0 as libc::c_int as AlphaChar;
+        current_block = 572715077006366937;
         match current_block {
             572715077006366937 => {}
             _ => return -(1 as libc::c_int),
@@ -513,13 +476,9 @@ pub(crate) extern "C" fn alpha_map_char_to_trie(
     }
 
     let am = unsafe { &*alpha_map };
-    let Some(alpha_to_trie) = am.alpha_to_trie_map_slice() else {
-        return TRIE_INDEX_MAX;
-    };
 
     if (am.alpha_begin..=am.alpha_end).contains(&ac) {
-        // TODO: We probably can write better mapping
-        return alpha_to_trie[(ac - am.alpha_begin) as usize];
+        return am.alpha_to_trie_map.get((ac - am.alpha_begin) as usize).copied().unwrap_or(TRIE_INDEX_MAX);
     }
 
     TRIE_INDEX_MAX
