@@ -1,10 +1,12 @@
-use crate::fileutils::*;
-use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
+use std::{iter, ptr, slice};
+use std::cmp::Ordering;
+
 use ::libc;
 use null_terminated::Nul;
-use std::cmp::Ordering;
-use std::{iter, ptr, slice};
+
 use crate::alpha_range::AlphaRange;
+use crate::fileutils::*;
+use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -46,74 +48,56 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct AlphaMap {
-    pub first_range: *mut AlphaRange,
     pub alpha_begin: AlphaChar,
+    pub first_range: *mut AlphaRange,
     pub alpha_end: AlphaChar,
     pub alpha_map_sz: i32,
     pub alpha_to_trie_map: *mut TrieIndex,
     pub trie_map_sz: i32,
     pub trie_to_alpha_map: *mut AlphaChar,
 }
+
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
 
 impl AlphaMap {
     fn range_iter(&self) -> Option<impl Iterator<Item = &AlphaRange>> {
-        if self.first_range.is_null() {
-            return None;
-        }
+        unsafe { self.first_range.as_ref().map(|v| v.iter()) }
+    }
 
-        unsafe { return Some((&*self.first_range).iter()) }
+    fn range_iter_mut(&self) -> Option<impl Iterator<Item = &mut AlphaRange>> {
+        unsafe { self.first_range.as_mut().map(|v| v.iter_mut()) }
+
     }
 
     fn alpha_to_trie_map_slice(&self) -> Option<&[TrieIndex]> {
-        if self.alpha_to_trie_map.is_null() {
-            return None;
-        }
-
         unsafe {
-            Some(slice::from_raw_parts(
-                self.alpha_to_trie_map,
-                self.alpha_map_sz as usize,
-            ))
+            self.alpha_to_trie_map
+                .as_ref()
+                .map(|v| slice::from_raw_parts(v, self.alpha_map_sz as usize))
         }
     }
 
     fn alpha_to_trie_map_slice_mut(&self) -> Option<&mut [TrieIndex]> {
-        if self.alpha_to_trie_map.is_null() {
-            return None;
-        }
-
         unsafe {
-            Some(slice::from_raw_parts_mut(
-                self.alpha_to_trie_map,
-                self.alpha_map_sz as usize,
-            ))
+            self.alpha_to_trie_map
+                .as_mut()
+                .map(|v| slice::from_raw_parts_mut(v, self.alpha_map_sz as usize))
         }
     }
 
     fn trie_to_alpha_map_slice(&self) -> Option<&[AlphaChar]> {
-        if self.trie_to_alpha_map.is_null() {
-            return None;
-        }
-
         unsafe {
-            Some(slice::from_raw_parts(
-                self.trie_to_alpha_map,
-                self.trie_map_sz as usize,
-            ))
+            self.trie_to_alpha_map
+                .as_ref()
+                .map(|v| slice::from_raw_parts(v, self.trie_map_sz as usize))
         }
     }
 
     fn trie_to_alpha_map_slice_mut(&self) -> Option<&mut [AlphaChar]> {
-        if self.trie_to_alpha_map.is_null() {
-            return None;
-        }
-
         unsafe {
-            Some(slice::from_raw_parts_mut(
-                self.trie_to_alpha_map,
-                self.trie_map_sz as usize,
-            ))
+            self.trie_to_alpha_map
+                .as_mut()
+                .map(|v| slice::from_raw_parts_mut(v, self.trie_map_sz as usize))
         }
     }
 }
@@ -235,13 +219,11 @@ pub unsafe extern "C" fn alpha_map_fread_bin(mut file: *mut FILE) -> *mut AlphaM
     return NULL as *mut AlphaMap;
 }
 
+// TODO: Change to usize
 fn alpha_map_get_total_ranges(alpha_map: *const AlphaMap) -> i32 {
     let am = unsafe { &*alpha_map };
 
-    match am.range_iter() {
-        Some(iter) => iter.count() as i32,
-        None => 0,
-    }
+    am.range_iter().map(|iter| iter.count()).unwrap_or(0) as i32
 }
 
 #[no_mangle]
@@ -292,26 +274,22 @@ pub unsafe extern "C" fn alpha_map_serialize_bin(
     }
 }
 unsafe extern "C" fn alpha_map_add_range_only(
-    mut alpha_map: *mut AlphaMap,
-    mut begin: AlphaChar,
-    mut end: AlphaChar,
+    alpha_map: *mut AlphaMap,
+    begin: AlphaChar,
+    end: AlphaChar,
 ) -> libc::c_int {
-    let mut q: *mut AlphaRange = 0 as *mut AlphaRange;
-    let mut r: *mut AlphaRange = 0 as *mut AlphaRange;
-    let mut begin_node: *mut AlphaRange = 0 as *mut AlphaRange;
-    let mut end_node: *mut AlphaRange = 0 as *mut AlphaRange;
     if begin > end {
-        return -(1 as libc::c_int);
+        return -1;
     }
-    end_node = 0 as *mut AlphaRange;
-    begin_node = end_node;
-    q = 0 as *mut AlphaRange;
-    r = (*alpha_map).first_range;
+    let mut begin_node = 0 as *mut AlphaRange;
+    let mut end_node = 0 as *mut AlphaRange;
+    let mut q = 0 as *mut AlphaRange;
+    let mut r = (*alpha_map).first_range;
     while !r.is_null() && (*r).begin <= begin {
         if begin <= (*r).end {
             begin_node = r;
             break;
-        } else if ((*r).end).wrapping_add(1 as libc::c_int as AlphaChar) == begin {
+        } else if (*r).end + 1 == begin {
             (*r).end = begin;
             begin_node = r;
             break;
@@ -322,12 +300,12 @@ unsafe extern "C" fn alpha_map_add_range_only(
     }
     if begin_node.is_null()
         && !r.is_null()
-        && (*r).begin <= end.wrapping_add(1 as libc::c_int as AlphaChar)
+        && (*r).begin <= end + 1
     {
         (*r).begin = begin;
         begin_node = r;
     }
-    while !r.is_null() && (*r).begin <= end.wrapping_add(1 as libc::c_int as AlphaChar) {
+    while !r.is_null() && (*r).begin <= end + 1 {
         if end <= (*r).end {
             end_node = r;
         } else if r != begin_node {
@@ -379,9 +357,9 @@ unsafe extern "C" fn alpha_map_add_range_only(
         }
     } else if begin_node.is_null() && end_node.is_null() {
         let mut range: *mut AlphaRange =
-            malloc(::core::mem::size_of::<AlphaRange>() as libc::c_ulong) as *mut AlphaRange;
+            malloc(size_of::<AlphaRange>() as libc::c_ulong) as *mut AlphaRange;
         if range.is_null() {
-            return -(1 as libc::c_int);
+            return -1;
         }
         (*range).begin = begin;
         (*range).end = end;
@@ -392,8 +370,9 @@ unsafe extern "C" fn alpha_map_add_range_only(
         }
         (*range).next = r;
     }
-    return 0 as libc::c_int;
+    0
 }
+
 unsafe extern "C" fn alpha_map_recalc_work_area(mut alpha_map: *mut AlphaMap) -> libc::c_int {
     let mut current_block: u64;
     let mut range: *mut AlphaRange = 0 as *mut AlphaRange;
@@ -496,6 +475,7 @@ unsafe extern "C" fn alpha_map_recalc_work_area(mut alpha_map: *mut AlphaMap) ->
     }
     return 0 as libc::c_int;
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn alpha_map_add_range(
     mut alpha_map: *mut AlphaMap,

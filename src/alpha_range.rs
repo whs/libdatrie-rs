@@ -1,7 +1,7 @@
-use std::marker::PhantomData;
 use crate::alpha_map::AlphaChar;
+use std::marker::PhantomData;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(C)]
 pub struct AlphaRange {
     pub next: *mut AlphaRange,
@@ -10,8 +10,15 @@ pub struct AlphaRange {
 }
 
 impl AlphaRange {
-    pub fn iter(&self) -> impl Iterator<Item=&AlphaRange> {
-        AlphaRangeIter{
+    pub fn iter(&self) -> impl Iterator<Item = &AlphaRange> {
+        AlphaRangeIter {
+            range: self,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut AlphaRange> {
+        AlphaRangeIterMut {
             range: self,
             phantom: PhantomData,
         }
@@ -27,11 +34,27 @@ impl<'a> Iterator for AlphaRangeIter<'a> {
     type Item = &'a AlphaRange;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.range.is_null() {
-            return None;
+        let out = unsafe { self.range.as_ref() };
+        if let Some(v) = out {
+            self.range = v.next
         }
-        let out = unsafe { &*self.range };
-        self.range = out.next;
-        Some(out)
+        out
+    }
+}
+
+struct AlphaRangeIterMut<'a> {
+    range: *mut AlphaRange,
+    phantom: PhantomData<&'a AlphaRange>,
+}
+
+impl<'a> Iterator for AlphaRangeIterMut<'a> {
+    type Item = &'a mut AlphaRange;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut out = unsafe { self.range.as_mut() };
+        if let Some(ref mut v) = out {
+            self.range = v.next
+        }
+        out
     }
 }

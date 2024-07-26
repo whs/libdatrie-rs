@@ -9,6 +9,7 @@
 #![feature(label_break_value)]
 
 pub mod alpha_map;
+mod alpha_range;
 pub mod darray;
 mod dstring;
 mod fileutils;
@@ -16,7 +17,6 @@ pub mod tail;
 pub mod trie;
 pub mod trie_string;
 mod types;
-mod alpha_range;
 
 pub mod tests {
     pub mod test_byte_alpha;
