@@ -1,27 +1,19 @@
 use ::libc;
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use null_terminated::Nul;
 use std::cmp::Ordering;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::{io, iter, ptr, slice};
 
 use crate::alpha_range::{AlphaRange, AlphaRangeIter, AlphaRangeIterMut};
-use crate::fileutils::*;
+use crate::fileutils::wrap_cfile;
 use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
-    fn ftell(__stream: *mut FILE) -> libc::c_long;
-    fn fseek(__stream: *mut FILE, __off: libc::c_long, __whence: libc::c_int) -> libc::c_int;
 }
 pub const NULL: libc::c_int = 0 as libc::c_int;
-pub type FILE = libc::FILE;
-pub type uint8 = u8;
-pub type uint32 = u32;
-pub type int32 = i32;
-pub type size_t = usize;
-pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
@@ -50,24 +42,68 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
 
 #[repr(C)]
 pub struct AlphaMap {
-    pub alpha_begin: AlphaChar,
-    pub first_range: *mut AlphaRange,
-    pub alpha_end: AlphaChar,
-    pub alpha_map_sz: i32,
-    pub alpha_to_trie_map: *mut TrieIndex,
-    pub trie_map_sz: i32,
-    pub trie_to_alpha_map: *mut AlphaChar,
+    alpha_begin: AlphaChar,
+    first_range: *mut AlphaRange,
+    alpha_end: AlphaChar,
+    alpha_map_sz: i32,
+    alpha_to_trie_map: *mut TrieIndex,
+    trie_map_sz: i32,
+    trie_to_alpha_map: *mut AlphaChar,
 }
 
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
 
 impl AlphaMap {
+    pub(crate) fn read<T: Read>(stream: &mut T) -> io::Result<AlphaMap> {
+        // check signature
+        match stream.read_u32::<BigEndian>() {
+            Ok(ALPHAMAP_SIGNATURE) => {}
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid signature",
+                ))
+            }
+            Err(v) => return Err(v),
+        }
+
+        let mut alphamap = AlphaMap::default();
+
+        // Read number of ranges
+        let total = stream.read_i32::<BigEndian>()?;
+
+        // Read character ranges
+        for _ in 0..total {
+            let b = stream.read_i32::<BigEndian>()?;
+            let e = stream.read_i32::<BigEndian>()?;
+            unsafe {
+                alpha_map_add_range_only(&mut alphamap, b as AlphaChar, e as AlphaChar);
+            }
+        }
+
+        // work area
+        unsafe {
+            if alpha_map_recalc_work_area(&mut alphamap) != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::OutOfMemory,
+                    "alpha_map_recalc_work_area fail",
+                ));
+            }
+        }
+
+        Ok(alphamap)
+    }
+
     fn range_iter(&self) -> Option<AlphaRangeIter> {
         unsafe { self.first_range.as_ref().map(|v| v.iter()) }
     }
 
     fn range_iter_mut(&self) -> Option<AlphaRangeIterMut> {
         unsafe { self.first_range.as_mut().map(|v| v.iter_mut()) }
+    }
+
+    fn total_range(&self) -> usize {
+        self.range_iter().map(|iter| iter.count()).unwrap_or(0)
     }
 
     fn alpha_to_trie_map_slice(&self) -> Option<&[TrieIndex]> {
@@ -100,6 +136,20 @@ impl AlphaMap {
                 .as_mut()
                 .map(|v| slice::from_raw_parts_mut(v, self.trie_map_sz as usize))
         }
+    }
+
+    fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
+        buf.write_u32::<BigEndian>(ALPHAMAP_SIGNATURE)?;
+        buf.write_i32::<BigEndian>(self.total_range() as i32)?;
+
+        if let Some(iter) = self.range_iter() {
+            for range in iter {
+                buf.write_i32::<BigEndian>(range.begin as i32)?;
+                buf.write_i32::<BigEndian>(range.end as i32)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -160,11 +210,13 @@ impl Drop for AlphaMap {
     }
 }
 
+#[deprecated(note = "Use AlphaMap::default()")]
 #[no_mangle]
 pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
     Box::into_raw(Box::new(AlphaMap::default()))
 }
 
+#[deprecated(note = "Use a_map::clone()")]
 #[no_mangle]
 pub extern "C" fn alpha_map_clone(mut a_map: *const AlphaMap) -> *mut AlphaMap {
     let Some(am) = (unsafe { a_map.as_ref() }) else {
@@ -174,12 +226,14 @@ pub extern "C" fn alpha_map_clone(mut a_map: *const AlphaMap) -> *mut AlphaMap {
     Box::into_raw(Box::new(am.clone()))
 }
 
+#[deprecated(note = "Just drop alpha_map")]
 #[no_mangle]
 pub unsafe extern "C" fn alpha_map_free(alpha_map: *mut AlphaMap) {
     let am = Box::from_raw(alpha_map);
     drop(am) // This is not strictly needed, but it helps in clarity
 }
 
+#[deprecated(note = "Use AlphaMap::read(). Careful about file position on failure!")]
 #[no_mangle]
 pub(crate) extern "C" fn alpha_map_fread_bin(file: *mut libc::FILE) -> *mut AlphaMap {
     let Some(mut file) = wrap_cfile(file) else {
@@ -188,7 +242,7 @@ pub(crate) extern "C" fn alpha_map_fread_bin(file: *mut libc::FILE) -> *mut Alph
 
     let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
 
-    match _read(&mut file) {
+    match AlphaMap::read(&mut file) {
         Ok(am) => Box::into_raw(Box::new(am.clone())),
         Err(_) => {
             // Return to save_pos if read fail
@@ -198,100 +252,44 @@ pub(crate) extern "C" fn alpha_map_fread_bin(file: *mut libc::FILE) -> *mut Alph
     }
 }
 
-fn _read<T: Read>(stream: &mut T) -> io::Result<AlphaMap> {
-    // check signature
-    match stream.read_u32::<BigEndian>() {
-        Ok(ALPHAMAP_SIGNATURE) => {}
-        Ok(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid signature",
-            ))
-        }
-        Err(v) => return Err(v),
-    }
-
-    let mut alphamap = AlphaMap::default();
-
-    // Read number of ranges
-    let total = stream.read_i32::<BigEndian>()?;
-
-    // Read character ranges
-    for _ in 0..total {
-        let b = stream.read_i32::<BigEndian>()?;
-        let e = stream.read_i32::<BigEndian>()?;
-        unsafe {
-            alpha_map_add_range_only(&mut alphamap, b as AlphaChar, e as AlphaChar);
-        }
-    }
-
-    // work area
-    unsafe {
-        if alpha_map_recalc_work_area(&mut alphamap) != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                "alpha_map_recalc_work_area fail",
-            ));
-        }
-    }
-
-    Ok(alphamap)
-}
-
-// TODO: Change to usize
+#[deprecated(note = "Use alpha_map.total_range()")]
 fn alpha_map_get_total_ranges(alpha_map: *const AlphaMap) -> i32 {
     let am = unsafe { &*alpha_map };
-
-    am.range_iter().map(|iter| iter.count()).unwrap_or(0) as i32
+    am.total_range() as i32
 }
 
+#[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_fwrite_bin(
-    mut alpha_map: *const AlphaMap,
-    mut file: *mut FILE,
-) -> libc::c_int {
-    let mut range: *mut AlphaRange = 0 as *mut AlphaRange;
-    if file_write_int32(file, ALPHAMAP_SIGNATURE as int32) as u64 == 0
-        || file_write_int32(file, alpha_map_get_total_ranges(alpha_map)) as u64 == 0
-    {
-        return -(1 as libc::c_int);
+pub extern "C" fn alpha_map_fwrite_bin(alpha_map: *const AlphaMap, file: *mut libc::FILE) -> i32 {
+    let Some(mut file) = wrap_cfile(file) else {
+        return -1;
+    };
+
+    let am = unsafe { &*alpha_map };
+
+    match am.serialize(&mut file) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    range = (*alpha_map).first_range;
-    while !range.is_null() {
-        if file_write_int32(file, (*range).begin as int32) as u64 == 0
-            || file_write_int32(file, (*range).end as int32) as u64 == 0
-        {
-            return -(1 as libc::c_int);
-        }
-        range = (*range).next;
-    }
-    return 0 as libc::c_int;
 }
 
 #[no_mangle]
 pub(crate) extern "C" fn alpha_map_get_serialized_size(alpha_map: *const AlphaMap) -> usize {
-    let ranges_count = alpha_map_get_total_ranges(alpha_map);
-
+    let am = unsafe { &*alpha_map };
     return 4 // ALPHAMAP_SIGNATURE
     + size_of::<i32>() // ranges_count
-    + (size_of::<AlphaChar>() * 2 * ranges_count as usize);
+    + (size_of::<AlphaChar>() * 2 * am.total_range());
 }
 
+#[deprecated(note = "Use alpha_map.serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_serialize_bin(
-    mut alpha_map: *const AlphaMap,
-    mut ptr: *mut *mut uint8,
-) {
-    let mut range: *mut AlphaRange = 0 as *mut AlphaRange;
-    serialize_int32_be_incr(ptr, ALPHAMAP_SIGNATURE as int32);
-    serialize_int32_be_incr(ptr, alpha_map_get_total_ranges(alpha_map));
-    range = (*alpha_map).first_range;
-    while !range.is_null() {
-        serialize_int32_be_incr(ptr, (*range).begin as int32);
-        serialize_int32_be_incr(ptr, (*range).end as int32);
-        range = (*range).next;
-    }
+pub unsafe extern "C" fn alpha_map_serialize_bin(alpha_map: *const AlphaMap, ptr: *mut *mut [u8]) {
+    let mut cursor = Cursor::new(&mut **ptr);
+    (*alpha_map).serialize(&mut cursor).unwrap();
+    // Move ptr
+    *ptr = (*ptr).byte_offset(cursor.position() as isize);
 }
+
 unsafe extern "C" fn alpha_map_add_range_only(
     alpha_map: *mut AlphaMap,
     begin: AlphaChar,
@@ -493,16 +491,16 @@ unsafe extern "C" fn alpha_map_recalc_work_area(mut alpha_map: *mut AlphaMap) ->
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alpha_map_add_range(
-    mut alpha_map: *mut AlphaMap,
-    mut begin: AlphaChar,
-    mut end: AlphaChar,
-) -> libc::c_int {
-    let mut res: libc::c_int = alpha_map_add_range_only(alpha_map, begin, end);
-    if res != 0 as libc::c_int {
+pub extern "C" fn alpha_map_add_range(
+    alpha_map: *mut AlphaMap,
+    begin: AlphaChar,
+    end: AlphaChar,
+) -> i32 {
+    let res = unsafe { alpha_map_add_range_only(alpha_map, begin, end) };
+    if res != 0 {
         return res;
     }
-    return alpha_map_recalc_work_area(alpha_map);
+    return unsafe { alpha_map_recalc_work_area(alpha_map) };
 }
 
 #[no_mangle]
