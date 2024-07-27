@@ -1,5 +1,5 @@
-use std::cmp::Ordering;
 use null_terminated::Nul;
+use std::cmp::Ordering;
 
 pub type Bool = u32;
 

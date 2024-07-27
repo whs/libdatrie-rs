@@ -1,5 +1,9 @@
+use std::ptr::NonNull;
+use std::{ptr, slice};
+
 use ::libc;
-use crate::trie::{TRIE_DATA_ERROR, TRIE_INDEX_ERROR, TrieChar, TrieData};
+
+use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR, TRIE_INDEX_ERROR};
 use crate::trie_string::{trie_char_strdup, trie_char_strlen, trie_char_strsize, TRIE_CHAR_TERM};
 use crate::types::*;
 
@@ -30,16 +34,56 @@ pub const SIZE_MAX: libc::c_ulong = 18446744073709551615 as libc::c_ulong;
 pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
 pub const NULL: libc::c_int = 0 as libc::c_int;
 
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub(crate) struct Tail {
     pub num_tails: TrieIndex,
-    pub tails: *mut TailBlock,
+    pub tails: *mut TailBlock, // This is Box<[TailBlock; num_tails]>
     pub first_free: TrieIndex,
 }
 
 pub(crate) const TAIL_SIGNATURE: u32 = 0xdffcdffc;
 pub(crate) const TAIL_START_BLOCKNO: i32 = 1;
+
+impl Tail {
+    fn blocks(&self) -> &[TailBlock] {
+        if self.tails.is_null() {
+            return &[];
+        }
+
+        unsafe { slice::from_raw_parts(self.tails.cast_const(), self.num_tails as usize) }
+    }
+
+    fn blocks_mut(&mut self) -> &mut [TailBlock] {
+        if self.tails.is_null() {
+            return &mut [];
+        }
+
+        unsafe { slice::from_raw_parts_mut(self.tails, self.num_tails as usize) }
+    }
+}
+
+impl Default for Tail {
+    fn default() -> Self {
+        Tail {
+            num_tails: 0,
+            tails: ptr::null_mut(),
+            first_free: 0,
+        }
+    }
+}
+
+impl Drop for Tail {
+    fn drop(&mut self) {
+        unsafe {
+            for block in self.blocks_mut() {
+                if !block.suffix.is_null() {
+                    free(block.suffix.cast());
+                }
+            }
+            free(self.tails.cast());
+        }
+    }
+}
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -50,16 +94,8 @@ pub(crate) struct TailBlock {
 }
 
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_new() -> *mut Tail {
-    let mut t: *mut Tail = 0 as *mut Tail;
-    t = malloc(::core::mem::size_of::<Tail>() as libc::c_ulong) as *mut Tail;
-    if t.is_null() {
-        return NULL as *mut Tail;
-    }
-    (*t).first_free = 0 as libc::c_int;
-    (*t).num_tails = 0 as libc::c_int;
-    (*t).tails = NULL as *mut TailBlock;
-    return t;
+pub(crate) extern "C" fn tail_new() -> *mut Tail {
+    Box::into_raw(Box::new(Tail::default()))
 }
 
 #[no_mangle]
@@ -161,24 +197,16 @@ pub(crate) unsafe extern "C" fn tail_fread(mut file: *mut FILE) -> *mut Tail {
 }
 
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_free(mut t: *mut Tail) {
-    let mut i: TrieIndex = 0;
-    if !((*t).tails).is_null() {
-        i = 0 as libc::c_int;
-        while i < (*t).num_tails {
-            if !((*((*t).tails).offset(i as isize)).suffix).is_null() {
-                free((*((*t).tails).offset(i as isize)).suffix as *mut libc::c_void);
-            }
-            i += 1;
-            i;
-        }
-        free((*t).tails as *mut libc::c_void);
-    }
-    free(t as *mut libc::c_void);
+pub(crate) unsafe extern "C" fn tail_free(mut t: NonNull<Tail>) {
+    let tail = Box::from_raw(t.as_ptr());
+    drop(tail);
 }
 
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_fwrite(mut t: *const Tail, mut file: *mut FILE) -> libc::c_int {
+pub(crate) unsafe extern "C" fn tail_fwrite(
+    mut t: *const Tail,
+    mut file: *mut FILE,
+) -> libc::c_int {
     let mut i: TrieIndex = 0;
     if file_write_int32(file, TAIL_SIGNATURE as int32) as u64 == 0
         || file_write_int32(file, (*t).first_free) as u64 == 0
@@ -234,8 +262,9 @@ pub(crate) unsafe extern "C" fn tail_get_serialized_size(mut t: *const Tail) -> 
         ) as size_t as size_t;
         while i < (*t).num_tails {
             if !((*((*t).tails).offset(i as isize)).suffix).is_null() {
-                dynamic_count = dynamic_count
-                    .wrapping_add(trie_char_strsize((*((*t).tails).offset(i as isize)).suffix) as u64);
+                dynamic_count = dynamic_count.wrapping_add(trie_char_strsize(
+                    (*((*t).tails).offset(i as isize)).suffix,
+                ) as u64);
             }
             i += 1;
             i;
@@ -386,7 +415,10 @@ unsafe fn tail_free_block(mut t: *mut Tail, mut block: TrieIndex) {
 }
 
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_get_data(mut t: *const Tail, mut index: TrieIndex) -> TrieData {
+pub(crate) unsafe extern "C" fn tail_get_data(
+    mut t: *const Tail,
+    mut index: TrieIndex,
+) -> TrieData {
     index -= TAIL_START_BLOCKNO;
     return if index < (*t).num_tails {
         (*((*t).tails).offset(index as isize)).data

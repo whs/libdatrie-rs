@@ -1,14 +1,14 @@
-use std::{io, iter, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
+use std::{io, iter, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
+use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
 use crate::types::*;
 
 extern "C" {
@@ -29,10 +29,7 @@ pub struct AlphaMap {
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
 
 impl AlphaMap {
-    pub fn add_range(
-        &mut self,
-        range: RangeInclusive<AlphaChar>,
-    ) -> Option<()> {
+    pub fn add_range(&mut self, range: RangeInclusive<AlphaChar>) -> Option<()> {
         // FIXME: Lazy type
         if range.start() > range.end() {
             return None;
@@ -254,7 +251,7 @@ pub extern "C" fn alpha_map_add_range(
     let am = unsafe { alpha_map.as_mut() };
     match am.add_range(begin..=end) {
         Some(_) => 0,
-        None => -1
+        None => -1,
     }
 }
 
