@@ -35,22 +35,6 @@ impl Symbols {
     }
 }
 
-#[deprecated]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn symbols_free(syms: *mut Symbols) {
-    drop(Box::from_raw(syms))
-}
-#[deprecated(note="Use syms.get().unwrap()")]
-#[no_mangle]
-pub(crate) extern "C" fn symbols_get(syms: *const Symbols, index: i32) -> TrieChar {
-    unsafe { &*syms }.get(index as usize).unwrap()
-}
-#[deprecated(note="Use syms.num()")]
-#[no_mangle]
-pub(crate) extern "C" fn symbols_num(syms: *const Symbols) -> i32 {
-    unsafe { &*syms }.num() as i32
-}
-
 #[cfg(test)]
 mod tests {
     use crate::symbols::Symbols;

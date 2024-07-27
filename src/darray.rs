@@ -1,11 +1,12 @@
+use std::cmp;
+
+use ::libc;
+
 use crate::fileutils::{file_read_int32, file_write_int32, serialize_int32_be_incr};
 use crate::symbols::Symbols;
 use crate::trie::TRIE_INDEX_ERROR;
 use crate::trie_string::{trie_string_append_char, trie_string_cut_last, TrieChar, TrieString};
 use crate::types::*;
-use ::libc;
-use arrayvec::ArrayVec;
-use std::cmp;
 
 extern "C" {
     fn memmove(_: *mut libc::c_void, _: *const libc::c_void, _: libc::c_ulong)
@@ -229,7 +230,7 @@ pub unsafe extern "C" fn da_insert_branch(
         if base > TRIE_INDEX_MAX - c as libc::c_int || da_check_free_cell(d, next) as u64 == 0 {
             let mut symbols = Symbols::default();
             let mut new_base: TrieIndex = 0;
-            symbols = da_output_symbols_rs(d, s);
+            symbols = da_output_symbols(d, s);
             symbols.add(c);
             new_base = da_find_free_base(d, &symbols);
             if 0 as libc::c_int == new_base {
@@ -281,7 +282,7 @@ unsafe extern "C" fn da_has_children(mut d: *const DArray, mut s: TrieIndex) -> 
     return FALSE as Bool;
 }
 
-pub(crate) unsafe fn da_output_symbols_rs(mut d: *const DArray, mut s: TrieIndex) -> Symbols {
+pub(crate) unsafe fn da_output_symbols(mut d: *const DArray, mut s: TrieIndex) -> Symbols {
     let mut syms = Symbols::default();
     let base = da_get_base(d, s);
     let max_c = cmp::min(TrieChar::MAX as TrieIndex, (*d).num_cells - base);
@@ -294,12 +295,6 @@ pub(crate) unsafe fn da_output_symbols_rs(mut d: *const DArray, mut s: TrieIndex
         c += 1;
     }
     syms
-}
-
-#[deprecated(note = "Use da_output_symbols_rs")]
-#[no_mangle]
-pub(crate) unsafe fn da_output_symbols(mut d: *const DArray, mut s: TrieIndex) -> *mut Symbols {
-    Box::into_raw(Box::new(da_output_symbols_rs(d, s)))
 }
 
 unsafe extern "C" fn da_find_free_base(mut d: *mut DArray, symbols: &Symbols) -> TrieIndex {
@@ -360,7 +355,7 @@ unsafe extern "C" fn da_relocate_base(
     let mut old_base: TrieIndex = 0;
     let mut i: libc::c_int = 0;
     old_base = da_get_base(d, s);
-    let symbols = da_output_symbols_rs(d, s);
+    let symbols = da_output_symbols(d, s);
     i = 0 as libc::c_int;
     while i < symbols.num() as i32 {
         let mut old_next: TrieIndex = 0;

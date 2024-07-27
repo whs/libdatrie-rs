@@ -1,3 +1,4 @@
+use crate::darray::da_output_symbols;
 use crate::types::*;
 use ::libc;
 
@@ -9,7 +10,6 @@ extern "C" {
     pub type _Tail;
     pub type _DArray;
     pub type _TrieString;
-    pub type _Symbols;
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
     fn fclose(__stream: *mut FILE) -> libc::c_int;
@@ -44,10 +44,6 @@ extern "C" {
     fn da_new() -> *mut DArray;
     fn da_get_check(d: *const DArray, s: TrieIndex) -> TrieIndex;
     fn da_fread(file: *mut FILE) -> *mut DArray;
-    fn da_output_symbols(d: *const DArray, s: TrieIndex) -> *mut Symbols;
-    fn symbols_free(syms: *mut Symbols);
-    fn symbols_get(syms: *const Symbols, index: libc::c_int) -> TrieChar;
-    fn symbols_num(syms: *const Symbols) -> libc::c_int;
     fn da_get_root(d: *const DArray) -> TrieIndex;
     fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool;
     fn da_get_serialized_size(d: *const DArray) -> size_t;
@@ -157,7 +153,6 @@ pub struct _TrieIterator {
 }
 pub type TrieString = _TrieString;
 pub type TrieIterator = _TrieIterator;
-pub type Symbols = _Symbols;
 pub const TRIE_DATA_ERROR: libc::c_int = -(1 as libc::c_int);
 pub const TRIE_INDEX_ERROR: libc::c_int = 0 as libc::c_int;
 pub const TRIE_CHAR_TERM: libc::c_int = '\0' as i32;
@@ -649,17 +644,15 @@ pub unsafe extern "C" fn trie_state_walkable_chars(
 ) -> libc::c_int {
     let mut syms_num: libc::c_int = 0 as libc::c_int;
     if (*s).is_suffix == 0 {
-        let mut syms: *mut Symbols = da_output_symbols((*(*s).trie).da, (*s).index);
+        let mut syms = da_output_symbols((*(*s).trie).da.cast(), (*s).index);
         let mut i: libc::c_int = 0;
-        syms_num = symbols_num(syms);
+        syms_num = syms.num() as libc::c_int;
         i = 0 as libc::c_int;
         while i < syms_num && i < chars_nelm {
-            let mut tc: TrieChar = symbols_get(syms, i);
+            let mut tc: TrieChar = syms.get(i as usize).unwrap();
             *chars.offset(i as isize) = alpha_map_trie_to_char((*(*s).trie).alpha_map, tc);
             i += 1;
-            i;
         }
-        symbols_free(syms);
     } else {
         let mut suffix: *const TrieChar = tail_get_suffix((*(*s).trie).tail, (*s).index);
         *chars.offset(0 as libc::c_int as isize) = alpha_map_trie_to_char(
