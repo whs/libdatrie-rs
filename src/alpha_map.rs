@@ -232,6 +232,7 @@ pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(
     alpha_map: *const AlphaMap,
     mut ptr: NonNull<NonNull<[u8]>>,
 ) {
+    // FIXME: [u8] type is not actually stable
     let mut cursor = Cursor::new(ptr.as_mut().as_mut());
     (*alpha_map).serialize(&mut cursor).unwrap();
     // Move ptr

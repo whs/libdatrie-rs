@@ -1,9 +1,12 @@
+use std::{io, ptr, slice};
+use std::io::{Cursor, Write};
 use std::ptr::NonNull;
-use std::{ptr, slice};
 
 use ::libc;
+use byteorder::{BigEndian, WriteBytesExt};
 
-use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR, TRIE_INDEX_ERROR};
+use crate::fileutils::wrap_cfile_nonnull;
+use crate::trie::{TRIE_DATA_ERROR, TRIE_INDEX_ERROR, TrieChar, TrieData};
 use crate::trie_string::{trie_char_strdup, trie_char_strlen, trie_char_strsize, TRIE_CHAR_TERM};
 use crate::types::*;
 
@@ -14,19 +17,13 @@ extern "C" {
     fn free(_: *mut libc::c_void);
     fn fseek(__stream: *mut FILE, __off: libc::c_long, __whence: libc::c_int) -> libc::c_int;
     fn ftell(__stream: *mut FILE) -> libc::c_long;
-    fn serialize_int32_be_incr(buff: *mut *mut uint8, val: int32);
     fn file_read_int32(file: *mut FILE, o_val: *mut int32) -> Bool;
-    fn file_write_int32(file: *mut FILE, val: int32) -> Bool;
-    fn serialize_int16_be_incr(buff: *mut *mut uint8, val: int16);
     fn file_read_int16(file: *mut FILE, o_val: *mut int16) -> Bool;
-    fn file_write_int16(file: *mut FILE, val: int16) -> Bool;
     fn file_read_chars(file: *mut FILE, buff: *mut libc::c_char, len: libc::c_int) -> Bool;
-    fn file_write_chars(file: *mut FILE, buff: *const libc::c_char, len: libc::c_int) -> Bool;
 }
 
 pub type size_t = libc::c_ulong;
 pub type FILE = libc::FILE;
-pub type uint8 = libc::c_uchar;
 pub type int16 = libc::c_short;
 pub type uint32 = libc::c_uint;
 pub type int32 = libc::c_int;
@@ -66,10 +63,7 @@ impl Tail {
         self.blocks().get(index).map(|v| v.suffix)
     }
 
-    pub(crate) fn get_data(
-        &self,
-        index: usize,
-    ) -> Option<TrieData> {
+    pub(crate) fn get_data(&self, index: usize) -> Option<TrieData> {
         let index = index - TAIL_START_BLOCKNO as usize;
         self.blocks().get(index).map(|v| v.data)
     }
@@ -80,9 +74,34 @@ impl Tail {
             Some(block) => {
                 block.data = data;
                 Some(())
-            },
-            None => None
+            }
+            None => None,
         }
+    }
+
+    pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
+        writer.write_u32::<BigEndian>(TAIL_SIGNATURE)?;
+        writer.write_i32::<BigEndian>(self.first_free)?;
+        writer.write_i32::<BigEndian>(self.num_tails)?;
+
+        for block in self.blocks() {
+            writer.write_i32::<BigEndian>(block.next_free)?;
+            writer.write_i32::<BigEndian>(block.data)?;
+
+            match unsafe { block.suffix.as_ref() } {
+                Some(suffix) => {
+                    let length = trie_char_strlen(suffix);
+                    writer.write_i16::<BigEndian>(length as i16)?;
+                    writer.write(unsafe { slice::from_raw_parts(suffix, length) })?;
+                }
+                None => {
+                    // write the length
+                    writer.write_i16::<BigEndian>(0)?;
+                }
+            };
+        }
+
+        Ok(())
     }
 }
 
@@ -117,7 +136,7 @@ pub(crate) struct TailBlock {
     pub suffix: *mut TrieChar,
 }
 
-#[deprecated(note="Use Tail::default()")]
+#[deprecated(note = "Use Tail::default()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_new() -> *mut Tail {
     Box::into_raw(Box::new(Tail::default()))
@@ -227,48 +246,15 @@ pub(crate) unsafe extern "C" fn tail_free(mut t: NonNull<Tail>) {
     drop(tail);
 }
 
+#[deprecated(note = "Use t.serialize()")]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_fwrite(
-    mut t: *const Tail,
-    mut file: *mut FILE,
-) -> libc::c_int {
-    let mut i: TrieIndex = 0;
-    if file_write_int32(file, TAIL_SIGNATURE as int32) as u64 == 0
-        || file_write_int32(file, (*t).first_free) as u64 == 0
-        || file_write_int32(file, (*t).num_tails) as u64 == 0
-    {
-        return -(1 as libc::c_int);
+pub(crate) extern "C" fn tail_fwrite(t: *const Tail, file: NonNull<libc::FILE>) -> i32 {
+    let tail = unsafe { &*t };
+    let mut file = wrap_cfile_nonnull(file);
+    match tail.serialize(&mut file) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    i = 0 as libc::c_int;
-    while i < (*t).num_tails {
-        let mut length: int16 = 0;
-        if file_write_int32(file, (*((*t).tails).offset(i as isize)).next_free) as u64 == 0
-            || file_write_int32(file, (*((*t).tails).offset(i as isize)).data) as u64 == 0
-        {
-            return -(1 as libc::c_int);
-        }
-        length = (if !((*((*t).tails).offset(i as isize)).suffix).is_null() {
-            trie_char_strlen((*((*t).tails).offset(i as isize)).suffix) as size_t
-        } else {
-            0 as libc::c_int as size_t
-        }) as int16;
-        if file_write_int16(file, length) as u64 == 0 {
-            return -(1 as libc::c_int);
-        }
-        if length as libc::c_int > 0 as libc::c_int
-            && file_write_chars(
-                file,
-                (*((*t).tails).offset(i as isize)).suffix as *mut libc::c_char,
-                length as libc::c_int,
-            ) as u64
-                == 0
-        {
-            return -(1 as libc::c_int);
-        }
-        i += 1;
-        i;
-    }
-    return 0 as libc::c_int;
 }
 
 #[no_mangle]
@@ -298,42 +284,22 @@ pub(crate) unsafe extern "C" fn tail_get_serialized_size(mut t: *const Tail) -> 
     return static_count.wrapping_add(dynamic_count);
 }
 
+#[deprecated(note = "Use t.serialize()")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_serialize(
-    mut t: *const Tail,
-    mut ptr: *mut *mut uint8,
-) -> libc::c_int {
-    let mut i: TrieIndex = 0;
-    serialize_int32_be_incr(ptr, TAIL_SIGNATURE as int32);
-    serialize_int32_be_incr(ptr, (*t).first_free);
-    serialize_int32_be_incr(ptr, (*t).num_tails);
-    i = 0 as libc::c_int;
-    while i < (*t).num_tails {
-        let mut length: int16 = 0;
-        serialize_int32_be_incr(ptr, (*((*t).tails).offset(i as isize)).next_free);
-        serialize_int32_be_incr(ptr, (*((*t).tails).offset(i as isize)).data);
-        length = (if !((*((*t).tails).offset(i as isize)).suffix).is_null() {
-            trie_char_strsize((*((*t).tails).offset(i as isize)).suffix) as size_t
-        } else {
-            0 as libc::c_int as size_t
-        }) as int16;
-        serialize_int16_be_incr(ptr, length);
-        if length != 0 {
-            memcpy(
-                *ptr as *mut libc::c_void,
-                (*((*t).tails).offset(i as isize)).suffix as *mut libc::c_char
-                    as *const libc::c_void,
-                length as libc::c_ulong,
-            );
-            *ptr = (*ptr).offset(length as libc::c_int as isize);
-        }
-        i += 1;
-        i;
-    }
-    return 0 as libc::c_int;
+    t: *const Tail,
+    mut ptr: NonNull<NonNull<[u8]>>,
+) -> i32 {
+    // FIXME: [u8] type is not actually stable
+    let mut cursor = Cursor::new(ptr.as_mut().as_mut());
+    (*t).serialize(&mut cursor).unwrap();
+    // Move ptr
+    ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
+
+    0
 }
 
-#[deprecated(note="Use t.get_suffix()")]
+#[deprecated(note = "Use t.get_suffix()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_get_suffix(
     mut t: *const Tail,
@@ -439,12 +405,9 @@ unsafe fn tail_free_block(mut t: *mut Tail, mut block: TrieIndex) {
     };
 }
 
-#[deprecated="Use t.get_data().unwrap_or(TRIE_DATA_ERROR)"]
+#[deprecated = "Use t.get_data().unwrap_or(TRIE_DATA_ERROR)"]
 #[no_mangle]
-pub(crate) extern "C" fn tail_get_data(
-    mut t: *const Tail,
-    mut index: TrieIndex,
-) -> TrieData {
+pub(crate) extern "C" fn tail_get_data(mut t: *const Tail, mut index: TrieIndex) -> TrieData {
     let tail = unsafe { &*t };
     match tail.get_data(index as usize) {
         Some(v) => v,
@@ -452,7 +415,7 @@ pub(crate) extern "C" fn tail_get_data(
     }
 }
 
-#[deprecated="Use t.set_data()"]
+#[deprecated = "Use t.set_data()"]
 #[no_mangle]
 pub(crate) extern "C" fn tail_set_data(
     mut t: NonNull<Tail>,
@@ -487,7 +450,9 @@ pub(crate) unsafe extern "C" fn tail_walk_str(
     len: libc::c_int,
 ) -> libc::c_int {
     let tail = unsafe { &*t };
-    let Some(suffix) = tail.get_suffix(s as usize) else { return FALSE as libc::c_int };
+    let Some(suffix) = tail.get_suffix(s as usize) else {
+        return FALSE as libc::c_int;
+    };
     let mut i = 0;
     let mut j = *suffix_idx;
     while i < len {
@@ -518,7 +483,9 @@ pub(crate) unsafe extern "C" fn tail_walk_char(
     c: TrieChar,
 ) -> Bool {
     let tail = unsafe { &*t };
-    let Some(suffix) = tail.get_suffix(s as usize) else { return FALSE };
+    let Some(suffix) = tail.get_suffix(s as usize) else {
+        return FALSE;
+    };
     let suffix_char = *suffix.offset(*suffix_idx as isize);
     if suffix_char == c {
         if TRIE_CHAR_TERM != suffix_char {
