@@ -1,8 +1,11 @@
-use std::{cmp, ptr, slice};
+use std::io::{Read, Seek, SeekFrom};
 use std::ptr::NonNull;
-use ::libc;
+use std::{cmp, io, ptr, slice};
 
-use crate::fileutils::{file_read_int32, file_write_int32, serialize_int32_be_incr};
+use ::libc;
+use byteorder::{BigEndian, ReadBytesExt};
+
+use crate::fileutils::{file_write_int32, serialize_int32_be_incr, wrap_cfile_nonnull};
 use crate::symbols::Symbols;
 use crate::trie::TRIE_INDEX_ERROR;
 use crate::trie_string::{trie_string_append_char, trie_string_cut_last, TrieChar, TrieString};
@@ -49,6 +52,39 @@ pub(crate) const DA_SIGNATURE: u32 = 0xdafcdafc;
 // - Cell 3: DA pool begin
 pub(crate) const DA_POOL_BEGIN: TrieIndex = 3;
 
+impl DArray {
+    pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
+        if reader.read_u32::<BigEndian>()? != DA_SIGNATURE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid signature",
+            ));
+        }
+
+        let num_cells = reader.read_i32::<BigEndian>()?;
+        if num_cells > (usize::MAX / size_of::<DACell>()) as i32 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "cell count too large",
+            ));
+        }
+
+        let cells: *mut DACell =
+            unsafe { malloc((num_cells as usize * size_of::<DACell>()) as libc::c_ulong).cast() };
+        let cells_slice = unsafe { slice::from_raw_parts_mut(cells, num_cells as usize) };
+
+        cells_slice[0].base = DA_SIGNATURE as TrieIndex;
+        cells_slice[0].check = num_cells;
+
+        for i in 1..(num_cells as usize) {
+            cells_slice[i].base = reader.read_i32::<BigEndian>()?;
+            cells_slice[i].check = reader.read_i32::<BigEndian>()?;
+        }
+
+        Ok(Self { num_cells, cells })
+    }
+}
+
 impl Default for DArray {
     fn default() -> Self {
         let mut d = Self {
@@ -56,7 +92,8 @@ impl Default for DArray {
             cells: ptr::null_mut(),
         };
 
-        d.cells = unsafe { malloc((d.num_cells as usize * size_of::<DACell>()) as libc::c_ulong).cast() };
+        d.cells =
+            unsafe { malloc((d.num_cells as usize * size_of::<DACell>()) as libc::c_ulong).cast() };
         let cells = unsafe { slice::from_raw_parts_mut(d.cells, d.num_cells as usize) };
 
         cells[0].base = DA_SIGNATURE as TrieIndex;
@@ -85,64 +122,20 @@ pub extern "C" fn da_new() -> *mut DArray {
     Box::into_raw(Box::new(DArray::default()))
 }
 
+#[deprecated(note = "Use DArray::read()")]
 #[no_mangle]
-pub unsafe extern "C" fn da_fread(mut file: *mut FILE) -> *mut DArray {
-    let mut current_block: u64;
-    let mut save_pos: libc::c_long = 0;
-    let mut d: *mut DArray = NULL as *mut DArray;
-    let mut n: TrieIndex = 0;
-    save_pos = ftell(file);
-    if !(file_read_int32(file, &mut n) as u64 == 0 || DA_SIGNATURE != n as uint32) {
-        d = malloc(size_of::<DArray>() as libc::c_ulong) as *mut DArray;
-        if !d.is_null() {
-            if !(file_read_int32(file, &mut (*d).num_cells) as u64 == 0) {
-                if !((*d).num_cells as libc::c_ulong
-                    > SIZE_MAX.wrapping_div(size_of::<DACell>() as libc::c_ulong))
-                {
-                    (*d).cells = malloc(((*d).num_cells as libc::c_ulong).wrapping_mul(size_of::<
-                        DACell,
-                    >(
-                    )
-                        as libc::c_ulong)) as *mut DACell;
-                    if !((*d).cells).is_null() {
-                        (*((*d).cells).offset(0 as libc::c_int as isize)).base =
-                            DA_SIGNATURE as TrieIndex;
-                        (*((*d).cells).offset(0 as libc::c_int as isize)).check = (*d).num_cells;
-                        n = 1 as libc::c_int;
-                        loop {
-                            if !(n < (*d).num_cells) {
-                                current_block = 11050875288958768710;
-                                break;
-                            }
-                            if file_read_int32(file, &mut (*((*d).cells).offset(n as isize)).base)
-                                as u64
-                                == 0
-                                || file_read_int32(
-                                    file,
-                                    &mut (*((*d).cells).offset(n as isize)).check,
-                                ) as u64
-                                    == 0
-                            {
-                                current_block = 3625861430878857304;
-                                break;
-                            }
-                            n += 1;
-                            n;
-                        }
-                        match current_block {
-                            11050875288958768710 => return d,
-                            _ => {
-                                free((*d).cells as *mut libc::c_void);
-                            }
-                        }
-                    }
-                }
-            }
-            free(d as *mut libc::c_void);
+pub extern "C" fn da_fread(mut file: NonNull<libc::FILE>) -> *mut DArray {
+    let mut file = wrap_cfile_nonnull(file);
+    let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
+
+    match DArray::read(&mut file) {
+        Ok(da) => Box::into_raw(Box::new(da)),
+        Err(_) => {
+            // Return to save_pos if read fail
+            let _ = file.seek(SeekFrom::Start(save_pos));
+            return ptr::null_mut();
         }
     }
-    fseek(file, save_pos, SEEK_SET);
-    return NULL as *mut DArray;
 }
 
 #[no_mangle]
@@ -169,7 +162,7 @@ pub unsafe extern "C" fn da_fwrite(mut d: *const DArray, mut file: *mut FILE) ->
 #[no_mangle]
 pub extern "C" fn da_get_serialized_size(d: *const DArray) -> usize {
     // TODO: Move into the struct
-    let da = unsafe {&*d};
+    let da = unsafe { &*d };
     if da.num_cells > 0 {
         4 * da.num_cells as usize * 2 // `base` and `check`
     } else {
@@ -360,11 +353,7 @@ unsafe fn da_find_free_base(mut d: *mut DArray, symbols: &Symbols) -> TrieIndex 
     return s - first_sym as libc::c_int;
 }
 
-unsafe fn da_fit_symbols(
-    mut d: *mut DArray,
-    mut base: TrieIndex,
-    symbols: &Symbols,
-) -> Bool {
+unsafe fn da_fit_symbols(mut d: *mut DArray, mut base: TrieIndex, symbols: &Symbols) -> Bool {
     let mut i: libc::c_int = 0;
     i = 0 as libc::c_int;
     while i < symbols.num() as i32 {
@@ -380,11 +369,7 @@ unsafe fn da_fit_symbols(
     return TRUE as Bool;
 }
 
-unsafe fn da_relocate_base(
-    mut d: *mut DArray,
-    mut s: TrieIndex,
-    mut new_base: TrieIndex,
-) {
+unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: TrieIndex) {
     let mut old_base: TrieIndex = 0;
     let mut i: libc::c_int = 0;
     old_base = da_get_base(d, s);

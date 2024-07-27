@@ -30,15 +30,11 @@ impl AlphaMap {
 
     pub(crate) fn read<T: Read>(stream: &mut T) -> io::Result<Self> {
         // check signature
-        match stream.read_u32::<BigEndian>() {
-            Ok(ALPHAMAP_SIGNATURE) => {}
-            Ok(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "invalid signature",
-                ))
-            }
-            Err(v) => return Err(v),
+        if stream.read_u32::<BigEndian>()? != ALPHAMAP_SIGNATURE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid signature",
+            ));
         }
 
         let mut alphamap = Self::default();
