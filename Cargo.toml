@@ -12,6 +12,7 @@ libc = "0.2"
 null-terminated = "0.3.17"
 byteorder = "1"
 cstream = "0.1.4"
+rangemap = "1.5.1"
 
 [profile.release-debug]
 inherits = "release"

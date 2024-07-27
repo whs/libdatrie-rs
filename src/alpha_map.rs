@@ -1,15 +1,16 @@
+use std::{io, iter, ptr, slice};
 use std::cmp::Ordering;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::ops::RangeInclusive;
 use std::ptr::NonNull;
-use std::{io, iter, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use null_terminated::Nul;
+use rangemap::RangeInclusiveSet;
 
-use crate::alpha_range::{AlphaRange, AlphaRangeIter, AlphaRangeIterMut};
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
+use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -38,11 +39,12 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
     }
 }
 
+#[derive(Clone, Default)]
 #[repr(C)]
 pub struct AlphaMap {
     alpha_begin: AlphaChar,
-    first_range: *mut AlphaRange,
     alpha_end: AlphaChar,
+    ranges: RangeInclusiveSet<AlphaChar>,
     alpha_to_trie_map: Box<[TrieIndex]>,
     trie_to_alpha_map: Box<[AlphaChar]>,
 }
@@ -50,6 +52,21 @@ pub struct AlphaMap {
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
 
 impl AlphaMap {
+    pub fn add_range(
+        &mut self,
+        range: RangeInclusive<AlphaChar>,
+    ) -> Option<()> {
+        // FIXME: Lazy type
+        if range.start() > range.end() {
+            return None;
+        }
+
+        self.ranges.insert(range);
+        self.recalc_work_area();
+
+        Some(())
+    }
+
     pub(crate) fn read<T: Read>(stream: &mut T) -> io::Result<AlphaMap> {
         // check signature
         match stream.read_u32::<BigEndian>() {
@@ -70,11 +87,12 @@ impl AlphaMap {
 
         // Read character ranges
         for _ in 0..total {
-            let b = stream.read_i32::<BigEndian>()?;
-            let e = stream.read_i32::<BigEndian>()?;
-            unsafe {
-                alpha_map_add_range_only((&mut alphamap).into(), b as AlphaChar, e as AlphaChar);
+            let begin = stream.read_i32::<BigEndian>()? as AlphaChar;
+            let end = stream.read_i32::<BigEndian>()? as AlphaChar;
+            if begin > end {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid range"));
             }
+            alphamap.ranges.insert(begin..=end);
         }
 
         // work area
@@ -88,19 +106,17 @@ impl AlphaMap {
         self.alpha_to_trie_map = Box::new([]);
         self.trie_to_alpha_map = Box::new([]);
 
-        let mut range = self.first_range;
-        if range.is_null() {
+        let Some(alpha_first) = self.ranges.first() else {
             return;
-        }
-
-        // This is basically am.first_range[0].begin
-        let alpha_begin = unsafe { (*range).begin };
+        };
+        let alpha_begin = *alpha_first.start();
 
         self.alpha_begin = alpha_begin;
+        // Count the total member within all self.ranges ranges
         let mut n_trie: usize = self
-            .range_iter()
-            .unwrap()
-            .map(|range| range.end as usize - range.begin as usize + 1)
+            .ranges
+            .iter()
+            .map(|range| *range.end() as usize - *range.start() as usize + 1)
             .sum();
         if n_trie < TRIE_CHAR_TERM as usize {
             // does this even hit? overflow handling?
@@ -108,7 +124,7 @@ impl AlphaMap {
         } else {
             n_trie += 1;
         }
-        self.alpha_end = self.range_iter().unwrap().last().unwrap().end;
+        self.alpha_end = *self.ranges.last().unwrap().end();
 
         let n_alpha = self.alpha_end as usize - alpha_begin as usize + 1;
 
@@ -116,8 +132,8 @@ impl AlphaMap {
         let mut trie_to_alpha_map = vec![ALPHA_CHAR_ERROR; n_trie].into_boxed_slice();
 
         let mut trie_char: TrieIndex = 0;
-        for range in unsafe { *self.first_range }.iter() {
-            for a in range.begin..=range.end {
+        for range in self.ranges.iter() {
+            for a in range.clone() {
                 if trie_char == TRIE_CHAR_TERM as TrieIndex {
                     trie_char += 1;
                 }
@@ -133,27 +149,13 @@ impl AlphaMap {
         self.trie_to_alpha_map = trie_to_alpha_map;
     }
 
-    fn range_iter(&self) -> Option<AlphaRangeIter> {
-        unsafe { self.first_range.as_ref().map(|v| v.iter()) }
-    }
-
-    fn range_iter_mut(&self) -> Option<AlphaRangeIterMut> {
-        unsafe { self.first_range.as_mut().map(|v| v.iter_mut()) }
-    }
-
-    fn total_range(&self) -> usize {
-        self.range_iter().map(|iter| iter.count()).unwrap_or(0)
-    }
-
     fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
         buf.write_u32::<BigEndian>(ALPHAMAP_SIGNATURE)?;
-        buf.write_i32::<BigEndian>(self.total_range() as i32)?;
+        buf.write_i32::<BigEndian>(self.ranges.len() as i32)?;
 
-        if let Some(iter) = self.range_iter() {
-            for range in iter {
-                buf.write_i32::<BigEndian>(range.begin as i32)?;
-                buf.write_i32::<BigEndian>(range.end as i32)?;
-            }
+        for range in self.ranges.iter() {
+            buf.write_i32::<BigEndian>(*range.start() as i32)?;
+            buf.write_i32::<BigEndian>(*range.end() as i32)?;
         }
 
         Ok(())
@@ -162,7 +164,7 @@ impl AlphaMap {
     pub(crate) fn serialized_size(&self) -> usize {
         return 4 // ALPHAMAP_SIGNATURE
             + size_of::<i32>() // ranges_count
-            + (size_of::<AlphaChar>() * 2 * self.total_range());
+            + (size_of::<AlphaChar>() * 2 * self.ranges.len());
     }
 
     pub(crate) fn char_to_trie(&self, ac: AlphaChar) -> TrieIndex {
@@ -186,51 +188,6 @@ impl AlphaMap {
             .get(tc as usize)
             .copied()
             .unwrap_or(ALPHA_CHAR_ERROR)
-    }
-}
-
-impl Default for AlphaMap {
-    fn default() -> Self {
-        AlphaMap {
-            first_range: ptr::null_mut(),
-            alpha_begin: 0,
-            alpha_end: 0,
-            alpha_to_trie_map: Box::new([]),
-            trie_to_alpha_map: Box::new([]),
-        }
-    }
-}
-
-impl Clone for AlphaMap {
-    fn clone(&self) -> Self {
-        let mut am = Self::default();
-
-        if let Some(iter) = self.range_iter() {
-            for range in iter {
-                unsafe {
-                    if alpha_map_add_range_only((&mut am).into(), range.begin, range.end) != 0 {
-                        panic!("clone fail")
-                    }
-                }
-            }
-        }
-
-        am.recalc_work_area();
-
-        am
-    }
-}
-
-impl Drop for AlphaMap {
-    fn drop(&mut self) {
-        unsafe {
-            let mut p = self.first_range;
-            while !p.is_null() {
-                let q = (*p).next;
-                free(p as *mut libc::c_void);
-                p = q;
-            }
-        }
     }
 }
 
@@ -307,7 +264,9 @@ pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(
     ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 }
 
-unsafe extern "C" fn alpha_map_add_range_only(
+#[deprecated(note = "Use alpha_map.add_range(begin..=end)")]
+#[no_mangle]
+pub extern "C" fn alpha_map_add_range(
     mut alpha_map: NonNull<AlphaMap>,
     begin: AlphaChar,
     end: AlphaChar,
@@ -315,107 +274,11 @@ unsafe extern "C" fn alpha_map_add_range_only(
     if begin > end {
         return -1;
     }
-    let mut begin_node = 0 as *mut AlphaRange;
-    let mut end_node = 0 as *mut AlphaRange;
-    let mut q = 0 as *mut AlphaRange;
-    let mut r = alpha_map.as_mut().first_range;
-    // Skip first ranges till 'begin' is covered
-    while !r.is_null() && (*r).begin <= begin {
-        if begin <= (*r).end {
-            // 'r' covers 'begin' -> take 'r' as beginning point
-            begin_node = r;
-            break;
-        } else if (*r).end + 1 == begin {
-            // 'begin' is next to 'r'-end
-            // -> extend 'r'-end to cover 'begin'
-            (*r).end = begin;
-            begin_node = r;
-            break;
-        }
-
-        q = r;
-        r = (*r).next;
+    let am = unsafe { alpha_map.as_mut() };
+    match am.add_range(begin..=end) {
+        Some(_) => 0,
+        None => -1
     }
-    if begin_node.is_null() && !r.is_null() && (*r).begin <= end + 1 {
-        // ['begin', 'end'] overlaps into 'r'-begin
-        // or 'r' is next to 'end' if r->begin == end + 1
-        // -> extend 'r'-begin to include the range
-        (*r).begin = begin;
-        begin_node = r;
-    }
-    // Run upto the first range that exceeds 'end'
-    while !r.is_null() && (*r).begin <= end + 1 {
-        if end <= (*r).end {
-            // 'r' covers 'end' -> take 'r' as ending point
-            end_node = r;
-        } else if r != begin_node {
-            // ['begin', 'end'] covers the whole 'r' -> remove 'r'
-            if !q.is_null() {
-                (*q).next = (*r).next;
-                free(r as *mut libc::c_void);
-                r = (*q).next;
-            } else {
-                alpha_map.as_mut().first_range = (*r).next;
-                free(r as *mut libc::c_void);
-                r = alpha_map.as_ref().first_range;
-            }
-            continue;
-        }
-        q = r;
-        r = (*r).next;
-    }
-    if end_node.is_null() && !q.is_null() && begin <= (*q).end {
-        // ['begin', 'end'] overlaps 'q' at the end
-        // -> extend 'q'-end to include the range
-        (*q).end = end;
-        end_node = q;
-    }
-    if !begin_node.is_null() && !end_node.is_null() {
-        if begin_node != end_node {
-            // Merge begin_node and end_node ranges together
-            assert_eq!((*begin_node).next, end_node);
-            (*begin_node).end = (*end_node).end;
-            (*begin_node).next = (*end_node).next;
-            free(end_node as *mut libc::c_void);
-        }
-    } else if begin_node.is_null() && end_node.is_null() {
-        // ['begin', 'end'] overlaps with none of the ranges
-        // -> insert a new range
-        let mut range: *mut AlphaRange =
-            malloc(size_of::<AlphaRange>() as libc::c_ulong) as *mut AlphaRange;
-
-        if range.is_null() {
-            return -1;
-        }
-
-        (*range).begin = begin;
-        (*range).end = end;
-
-        // insert it between 'q' and 'r'
-        if !q.is_null() {
-            (*q).next = range;
-        } else {
-            alpha_map.as_mut().first_range = range;
-        }
-        (*range).next = r;
-    }
-
-    0
-}
-
-#[no_mangle]
-pub extern "C" fn alpha_map_add_range(
-    mut alpha_map: NonNull<AlphaMap>,
-    begin: AlphaChar,
-    end: AlphaChar,
-) -> i32 {
-    let res = unsafe { alpha_map_add_range_only(alpha_map, begin, end) };
-    if res != 0 {
-        return res;
-    }
-    unsafe { alpha_map.as_mut() }.recalc_work_area();
-
-    0
 }
 
 #[deprecated(note = "Use alpha_map.char_to_trie()")]

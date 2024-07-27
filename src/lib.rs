@@ -8,7 +8,6 @@
 #![feature(extern_types)]
 
 pub mod alpha_map;
-mod alpha_range;
 pub mod darray;
 mod dstring;
 mod fileutils;
