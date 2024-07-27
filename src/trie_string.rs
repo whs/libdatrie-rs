@@ -26,6 +26,17 @@ pub extern "C" fn trie_char_strsize(str: *const TrieChar) -> usize {
     trie_char_strlen(str) * size_of::<TrieChar>()
 }
 
+// trie_char_clone copies the C-string str into a Rust heap-allocated array.
+// The array has the same length of the str in C plus the TRIE_CHAR_TERM byte.
+pub(crate) fn trie_char_clone(str: *const TrieChar) -> Box<[TrieChar]> {
+    let len = trie_char_strlen(str) + 1;
+
+    let str_slice = unsafe { slice::from_raw_parts(str, len) };
+    let cloned = Vec::from(str_slice);
+
+    cloned.into_boxed_slice()
+}
+
 #[no_mangle]
 pub extern "C" fn trie_char_strdup(str: *const TrieChar) -> *mut TrieChar {
     let len = trie_char_strlen(str) + 1;

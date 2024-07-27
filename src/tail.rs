@@ -7,15 +7,8 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR, TRIE_INDEX_ERROR};
-use crate::trie_string::{trie_char_strdup, trie_char_strlen, trie_char_strsize, TRIE_CHAR_TERM};
+use crate::trie_string::{trie_char_clone, TRIE_CHAR_TERM};
 use crate::types::*;
-
-extern "C" {
-    fn memcpy(_: *mut libc::c_void, _: *const libc::c_void, _: libc::c_ulong) -> *mut libc::c_void;
-    fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
-    fn realloc(_: *mut libc::c_void, _: libc::c_ulong) -> *mut libc::c_void;
-    fn free(_: *mut libc::c_void);
-}
 
 type size_t = libc::c_ulong;
 type int16 = libc::c_short;
@@ -25,44 +18,40 @@ const NULL: libc::c_int = 0 as libc::c_int;
 
 #[repr(C)]
 pub(crate) struct Tail {
-    pub num_tails: TrieIndex,
-    pub tails: *mut TailBlock, // This is Box<[TailBlock; num_tails]>
-    pub first_free: TrieIndex,
+    tails: Vec<TailBlock>,
+    first_free: TrieIndex,
 }
 
 pub(crate) const TAIL_SIGNATURE: u32 = 0xdffcdffc;
-pub(crate) const TAIL_START_BLOCKNO: i32 = 1;
+pub(crate) const TAIL_START_BLOCKNO: TrieIndex = 1;
 
 impl Tail {
+    #[deprecated(note = "Use self.tails")]
     fn blocks(&self) -> &[TailBlock] {
-        if self.tails.is_null() {
-            return &[];
-        }
-
-        unsafe { slice::from_raw_parts(self.tails.cast_const(), self.num_tails as usize) }
+        &self.tails
     }
 
+    #[deprecated(note = "Use self.tails")]
     fn blocks_mut(&mut self) -> &mut [TailBlock] {
-        if self.tails.is_null() {
-            return &mut [];
-        }
-
-        unsafe { slice::from_raw_parts_mut(self.tails, self.num_tails as usize) }
+        &mut self.tails
     }
 
-    pub(crate) fn get_suffix(&self, index: usize) -> Option<*mut TrieChar> {
+    pub(crate) fn get_suffix(&self, index: usize) -> Option<&[TrieChar]> {
         let index = index - TAIL_START_BLOCKNO as usize;
-        self.blocks().get(index).map(|v| v.suffix)
+        match self.tails.get(index).map(|v| &v.suffix) {
+            Some(Some(ref v)) => Some(&v),
+            _ => None,
+        }
     }
 
     pub(crate) fn get_data(&self, index: usize) -> Option<TrieData> {
         let index = index - TAIL_START_BLOCKNO as usize;
-        self.blocks().get(index).map(|v| v.data)
+        self.tails.get(index).map(|v| v.data)
     }
 
     pub(crate) fn set_data(&mut self, index: usize, data: TrieData) -> Option<()> {
         let index = index - TAIL_START_BLOCKNO as usize;
-        match self.blocks_mut().get_mut(index) {
+        match self.tails.get_mut(index) {
             Some(block) => {
                 block.data = data;
                 Some(())
@@ -80,32 +69,34 @@ impl Tail {
         }
         let mut tail = Self::default();
         tail.first_free = reader.read_i32::<BigEndian>()?;
-        tail.num_tails = reader.read_i32::<BigEndian>()?;
+        let num_tails = reader.read_i32::<BigEndian>()?;
 
-        if tail.num_tails > (usize::MAX / size_of::<TailBlock>()) as i32 {
+        if num_tails > (usize::MAX / size_of::<TailBlock>()) as i32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "block count too large",
             ));
         }
 
-        // TODO: This leaks if this function fails. It should be fixed when the tail.tails type is safe
-        tail.tails = unsafe {
-            malloc((tail.num_tails as usize * size_of::<TailBlock>()) as libc::c_ulong).cast()
-        };
-        let blocks = tail.blocks_mut();
+        // TODO: Consider using MaybeUninit
+        let mut blocks = vec![TailBlock::default(); num_tails as usize];
 
-        for block in blocks {
+        for block in &mut blocks {
             block.next_free = reader.read_i32::<BigEndian>()?;
             block.data = reader.read_i32::<BigEndian>()?;
+            block.suffix = None;
 
             let length = reader.read_i16::<BigEndian>()?;
-            // TODO: This leaks if this function fails. It should be fixed when the tail.tails type is safe
-            block.suffix = unsafe { malloc((length + 1) as libc::c_ulong).cast() };
-            let suffix = unsafe { slice::from_raw_parts_mut(block.suffix, (length + 1) as usize) };
-            reader.read_exact(suffix)?;
-            suffix[length as usize] = TRIE_CHAR_TERM;
+            if length > 0 {
+                let mut suffix = vec![TRIE_CHAR_TERM; (length + 1) as usize];
+                reader.read_exact(&mut suffix[..(length as usize)])?;
+                suffix[length as usize] = TRIE_CHAR_TERM;
+
+                block.suffix = Some(suffix.into_boxed_slice());
+            }
         }
+
+        tail.tails = blocks;
 
         Ok(tail)
     }
@@ -113,21 +104,21 @@ impl Tail {
     pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
         writer.write_u32::<BigEndian>(TAIL_SIGNATURE)?;
         writer.write_i32::<BigEndian>(self.first_free)?;
-        writer.write_i32::<BigEndian>(self.num_tails)?;
+        writer.write_i32::<BigEndian>(self.tails.len() as i32)?;
 
-        for block in self.blocks() {
+        for block in &self.tails {
             writer.write_i32::<BigEndian>(block.next_free)?;
             writer.write_i32::<BigEndian>(block.data)?;
 
-            match unsafe { block.suffix.as_ref() } {
-                Some(suffix) => {
-                    let length = trie_char_strlen(suffix);
-                    writer.write_i16::<BigEndian>(length as i16)?;
-                    writer.write(unsafe { slice::from_raw_parts(suffix, length) })?;
-                }
+            match &block.suffix {
                 None => {
                     // write the length
                     writer.write_i16::<BigEndian>(0)?;
+                }
+                Some(suffix) => {
+                    let length = suffix.len() - 1;
+                    writer.write_i16::<BigEndian>(length as i16)?;
+                    writer.write(&suffix[..length])?;
                 }
             };
         }
@@ -146,9 +137,9 @@ impl Tail {
         size_of::<i32>() // TAIL_SIGNATURE
             + size_of::<TrieIndex>() // first_free
             + size_of::<TrieIndex>() // num_tails
-            + (size_of_block * self.num_tails as usize)
-            + self.blocks().iter().map(|block| {
-            trie_char_strsize(block.suffix)
+            + (size_of_block * self.tails.len() as usize)
+            + self.tails.iter().map(|block| {
+            block.suffix.as_ref().map(|suffix| suffix.len() - 1).unwrap_or(0)
         }).sum::<usize>()
     }
 }
@@ -156,32 +147,36 @@ impl Tail {
 impl Default for Tail {
     fn default() -> Self {
         Tail {
-            num_tails: 0,
-            tails: ptr::null_mut(),
+            tails: Vec::new(),
             first_free: 0,
         }
     }
 }
 
-impl Drop for Tail {
-    fn drop(&mut self) {
-        unsafe {
-            for block in self.blocks_mut() {
-                if !block.suffix.is_null() {
-                    free(block.suffix.cast());
-                }
-            }
-            free(self.tails.cast());
-        }
+#[derive(Clone)]
+#[repr(C)]
+pub(crate) struct TailBlock {
+    next_free: TrieIndex,
+    data: TrieData,
+    suffix: Option<Box<[TrieChar]>>,
+}
+
+impl TailBlock {
+    fn reset(&mut self) {
+        self.next_free = -1;
+        self.data = TRIE_DATA_ERROR;
+        self.suffix = None;
     }
 }
 
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub(crate) struct TailBlock {
-    pub next_free: TrieIndex,
-    pub data: TrieData,
-    pub suffix: *mut TrieChar,
+impl Default for TailBlock {
+    fn default() -> Self {
+        TailBlock {
+            next_free: -1,
+            data: TRIE_DATA_ERROR,
+            suffix: None,
+        }
+    }
 }
 
 #[deprecated(note = "Use Tail::default()")]
@@ -236,7 +231,7 @@ pub(crate) unsafe extern "C" fn tail_serialize(
     t: *const Tail,
     mut ptr: NonNull<NonNull<[u8]>>,
 ) -> i32 {
-    // FIXME: [u8] type is not actually stable
+    // FIXME: [u8] type is not actually stable ABI
     let mut cursor = Cursor::new(ptr.as_mut().as_mut());
     (*t).serialize(&mut cursor).unwrap();
     // Move ptr
@@ -253,41 +248,38 @@ pub(crate) extern "C" fn tail_get_suffix(
 ) -> *const TrieChar {
     let tail = unsafe { &*t };
     match tail.get_suffix(index as usize) {
-        Some(v) => v,
+        Some(v) => v.as_ptr(),
         None => ptr::null(),
     }
 }
 
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_set_suffix(
-    mut t: *mut Tail,
-    mut index: TrieIndex,
-    mut suffix: *const TrieChar,
+pub(crate) extern "C" fn tail_set_suffix(
+    mut t: NonNull<Tail>,
+    index: TrieIndex,
+    suffix: *const TrieChar,
 ) -> Bool {
-    index -= TAIL_START_BLOCKNO;
-    if index < (*t).num_tails {
-        let mut tmp: *mut TrieChar = NULL as *mut TrieChar;
-        if !suffix.is_null() {
-            tmp = trie_char_strdup(suffix);
-            if tmp.is_null() {
-                return FALSE as Bool;
-            }
-        }
-        if !((*((*t).tails).offset(index as isize)).suffix).is_null() {
-            free((*((*t).tails).offset(index as isize)).suffix as *mut libc::c_void);
-        }
-        let ref mut fresh1 = (*((*t).tails).offset(index as isize)).suffix;
-        *fresh1 = tmp;
-        return TRUE as Bool;
+    // TODO: Move into the struct
+    let index = (index - TAIL_START_BLOCKNO) as usize;
+    let tail = unsafe { t.as_mut() };
+
+    if index >= tail.tails.len() {
+        return FALSE;
     }
-    return FALSE as Bool;
+
+    let suffix = unsafe { suffix.as_ref() }.map(|v| trie_char_clone(v));
+
+    tail.tails[index].suffix = suffix;
+
+    TRUE
 }
 
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_add_suffix(
-    mut t: *mut Tail,
-    mut suffix: *const TrieChar,
+pub(crate) extern "C" fn tail_add_suffix(
+    mut t: NonNull<Tail>,
+    suffix: *const TrieChar,
 ) -> TrieIndex {
+    // TODO: Move into the struct
     let mut new_block: TrieIndex = 0;
     new_block = tail_alloc_block(t);
     if 0 as libc::c_int == new_block {
@@ -297,58 +289,47 @@ pub(crate) unsafe extern "C" fn tail_add_suffix(
     return new_block;
 }
 
-unsafe fn tail_alloc_block(mut t: *mut Tail) -> TrieIndex {
-    let mut block: TrieIndex = 0;
-    if 0 as libc::c_int != (*t).first_free {
-        block = (*t).first_free;
-        (*t).first_free = (*((*t).tails).offset(block as isize)).next_free;
+fn tail_alloc_block(mut t: NonNull<Tail>) -> TrieIndex {
+    // TODO: Move into the struct
+    let mut tail = unsafe { t.as_mut() };
+
+    let mut block_idx;
+    if tail.first_free != 0 {
+        block_idx = tail.first_free;
+        tail.first_free = tail.tails[block_idx as usize].next_free;
+
+        tail.tails[block_idx as usize].reset();
     } else {
-        let mut new_block: *mut libc::c_void = 0 as *mut libc::c_void;
-        block = (*t).num_tails;
-        new_block = realloc(
-            (*t).tails as *mut libc::c_void,
-            (((*t).num_tails + 1 as libc::c_int) as libc::c_ulong)
-                .wrapping_mul(::core::mem::size_of::<TailBlock>() as libc::c_ulong),
-        );
-        if new_block.is_null() {
-            return TRIE_INDEX_ERROR;
-        }
-        (*t).tails = new_block as *mut TailBlock;
-        (*t).num_tails += 1;
-        (*t).num_tails;
+        block_idx = tail.tails.len() as TrieIndex;
+        tail.tails.push(TailBlock::default());
     }
-    (*((*t).tails).offset(block as isize)).next_free = -(1 as libc::c_int);
-    (*((*t).tails).offset(block as isize)).data = TRIE_DATA_ERROR;
-    let ref mut fresh2 = (*((*t).tails).offset(block as isize)).suffix;
-    *fresh2 = NULL as *mut TrieChar;
-    return block + TAIL_START_BLOCKNO;
+
+    block_idx + TAIL_START_BLOCKNO
 }
 
-unsafe fn tail_free_block(mut t: *mut Tail, mut block: TrieIndex) {
-    let mut i: TrieIndex = 0;
-    let mut j: TrieIndex = 0;
-    block -= TAIL_START_BLOCKNO;
-    if block >= (*t).num_tails {
-        return;
-    }
-    (*((*t).tails).offset(block as isize)).data = TRIE_DATA_ERROR;
-    if !((*((*t).tails).offset(block as isize)).suffix).is_null() {
-        free((*((*t).tails).offset(block as isize)).suffix as *mut libc::c_void);
-        let ref mut fresh3 = (*((*t).tails).offset(block as isize)).suffix;
-        *fresh3 = NULL as *mut TrieChar;
-    }
-    j = 0 as libc::c_int;
-    i = (*t).first_free;
-    while i != 0 as libc::c_int && i < block {
+fn tail_free_block(mut t: NonNull<Tail>, block: TrieIndex) {
+    let block_idx = (block - TAIL_START_BLOCKNO) as usize;
+    let tail = unsafe { t.as_mut() };
+
+    // find insertion point
+    let mut j = 0;
+    let mut i = tail.first_free as usize;
+    while i != 0 && i < block_idx {
         j = i;
-        i = (*((*t).tails).offset(i as isize)).next_free;
+        i = tail.tails[i].next_free as usize;
     }
-    (*((*t).tails).offset(block as isize)).next_free = i;
-    if 0 as libc::c_int != j {
-        (*((*t).tails).offset(j as isize)).next_free = block;
-    } else {
-        (*t).first_free = block;
+
+    let Some(block) = tail.tails.get_mut(block_idx) else {
+        return;
     };
+    block.reset();
+    block.next_free = i as TrieIndex;
+
+    if j != 0 {
+        tail.tails[j].next_free = block_idx as TrieIndex;
+    } else {
+        tail.first_free = block_idx as TrieIndex;
+    }
 }
 
 #[deprecated = "Use t.get_data().unwrap_or(TRIE_DATA_ERROR)"]
@@ -377,8 +358,9 @@ pub(crate) extern "C" fn tail_set_data(
 
 // Delete suffix entry from the tail data.
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
-    tail_free_block(t.as_mut(), index);
+pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
+    // TODO: Move into the struct
+    tail_free_block(t, index);
 }
 
 // Walk in tail with a string
@@ -391,28 +373,34 @@ pub(crate) unsafe extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieInd
 pub(crate) unsafe extern "C" fn tail_walk_str(
     t: *const Tail,
     s: TrieIndex,
-    suffix_idx: *mut libc::c_short,
+    suffix_idx: *mut i16,
     str: *const TrieChar,
-    len: libc::c_int,
-) -> libc::c_int {
+    len: i32,
+) -> i32 {
+    // TODO: Move into the struct
     let tail = unsafe { &*t };
     let Some(suffix) = tail.get_suffix(s as usize) else {
         return FALSE as libc::c_int;
     };
+    let str = slice::from_raw_parts(str, len as usize);
+
     let mut i = 0;
-    let mut j = *suffix_idx;
-    while i < len {
-        if *str.offset(i as isize) as libc::c_int != *suffix.offset(j as isize) as libc::c_int {
+    let mut j = *suffix_idx as usize;
+    while i < str.len() {
+        if str[i] != suffix[j] {
             break;
         }
         i += 1;
-        if TRIE_CHAR_TERM as libc::c_int == *suffix.offset(j as isize) as libc::c_int {
+
+        // stop and stay at null-terminator
+        if suffix[j] == TRIE_CHAR_TERM {
             break;
         }
         j += 1;
     }
-    *suffix_idx = j;
-    i
+    *suffix_idx = j as i16;
+
+    i as i32
 }
 
 // Walk in tail with a character
@@ -432,7 +420,7 @@ pub(crate) unsafe extern "C" fn tail_walk_char(
     let Some(suffix) = tail.get_suffix(s as usize) else {
         return FALSE;
     };
-    let suffix_char = *suffix.offset(*suffix_idx as isize);
+    let suffix_char = suffix[*suffix_idx as usize];
     if suffix_char == c {
         if TRIE_CHAR_TERM != suffix_char {
             *suffix_idx += 1;
