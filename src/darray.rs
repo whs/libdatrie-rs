@@ -1,8 +1,11 @@
-use ::libc;
 use crate::fileutils::{file_read_int32, file_write_int32, serialize_int32_be_incr};
+use crate::symbols::Symbols;
 use crate::trie::TRIE_INDEX_ERROR;
 use crate::trie_string::{trie_string_append_char, trie_string_cut_last, TrieChar, TrieString};
 use crate::types::*;
+use ::libc;
+use arrayvec::ArrayVec;
+use std::cmp;
 
 extern "C" {
     fn memmove(_: *mut libc::c_void, _: *const libc::c_void, _: libc::c_ulong)
@@ -22,72 +25,6 @@ pub type int32 = i32;
 pub const SIZE_MAX: libc::c_ulong = 18446744073709551615 as libc::c_ulong;
 pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
 pub const NULL: libc::c_int = 0 as libc::c_int;
-
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct Symbols {
-    pub num_symbols: libc::c_short,
-    pub symbols: [TrieChar; 256],
-}
-
-unsafe extern "C" fn symbols_new() -> *mut Symbols {
-    let mut syms: *mut Symbols = 0 as *mut Symbols;
-    syms = malloc(::core::mem::size_of::<Symbols>() as libc::c_ulong) as *mut Symbols;
-    if syms.is_null() {
-        return NULL as *mut Symbols;
-    }
-    (*syms).num_symbols = 0 as libc::c_int as libc::c_short;
-    return syms;
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn symbols_free(mut syms: *mut Symbols) {
-    free(syms as *mut libc::c_void);
-}
-
-unsafe extern "C" fn symbols_add(mut syms: *mut Symbols, mut c: TrieChar) {
-    let mut lower: libc::c_short = 0;
-    let mut upper: libc::c_short = 0;
-    lower = 0 as libc::c_int as libc::c_short;
-    upper = (*syms).num_symbols;
-    while (lower as libc::c_int) < upper as libc::c_int {
-        let mut middle: libc::c_short = 0;
-        middle =
-            ((lower as libc::c_int + upper as libc::c_int) / 2 as libc::c_int) as libc::c_short;
-        if c as libc::c_int > (*syms).symbols[middle as usize] as libc::c_int {
-            lower = (middle as libc::c_int + 1 as libc::c_int) as libc::c_short;
-        } else if (c as libc::c_int) < (*syms).symbols[middle as usize] as libc::c_int {
-            upper = middle;
-        } else {
-            return;
-        }
-    }
-    if (lower as libc::c_int) < (*syms).num_symbols as libc::c_int {
-        memmove(
-            ((*syms).symbols)
-                .as_mut_ptr()
-                .offset(lower as libc::c_int as isize)
-                .offset(1 as libc::c_int as isize) as *mut libc::c_void,
-            ((*syms).symbols)
-                .as_mut_ptr()
-                .offset(lower as libc::c_int as isize) as *const libc::c_void,
-            ((*syms).num_symbols as libc::c_int - lower as libc::c_int) as libc::c_ulong,
-        );
-    }
-    (*syms).symbols[lower as usize] = c;
-    (*syms).num_symbols += 1;
-    (*syms).num_symbols;
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn symbols_num(mut syms: *const Symbols) -> libc::c_int {
-    return (*syms).num_symbols as libc::c_int;
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn symbols_get(mut syms: *const Symbols, mut index: libc::c_int) -> TrieChar {
-    return (*syms).symbols[index as usize];
-}
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -145,10 +82,11 @@ pub unsafe extern "C" fn da_fread(mut file: *mut FILE) -> *mut DArray {
                 if !((*d).num_cells as libc::c_ulong
                     > SIZE_MAX.wrapping_div(size_of::<DACell>() as libc::c_ulong))
                 {
-                    (*d).cells = malloc(
-                        ((*d).num_cells as libc::c_ulong)
-                            .wrapping_mul(size_of::<DACell>() as libc::c_ulong),
-                    ) as *mut DACell;
+                    (*d).cells = malloc(((*d).num_cells as libc::c_ulong).wrapping_mul(size_of::<
+                        DACell,
+                    >(
+                    )
+                        as libc::c_ulong)) as *mut DACell;
                     if !((*d).cells).is_null() {
                         (*((*d).cells).offset(0 as libc::c_int as isize)).base =
                             DA_SIGNATURE as TrieIndex;
@@ -289,12 +227,11 @@ pub unsafe extern "C" fn da_insert_branch(
             return next;
         }
         if base > TRIE_INDEX_MAX - c as libc::c_int || da_check_free_cell(d, next) as u64 == 0 {
-            let mut symbols: *mut Symbols = 0 as *mut Symbols;
+            let mut symbols = Symbols::default();
             let mut new_base: TrieIndex = 0;
-            symbols = da_output_symbols(d, s);
-            symbols_add(symbols, c);
-            new_base = da_find_free_base(d, symbols);
-            symbols_free(symbols);
+            symbols = da_output_symbols_rs(d, s);
+            symbols.add(c);
+            new_base = da_find_free_base(d, &symbols);
             if 0 as libc::c_int == new_base {
                 return TRIE_INDEX_ERROR;
             }
@@ -302,12 +239,10 @@ pub unsafe extern "C" fn da_insert_branch(
             next = new_base + c as libc::c_int;
         }
     } else {
-        let mut symbols_0: *mut Symbols = 0 as *mut Symbols;
         let mut new_base_0: TrieIndex = 0;
-        symbols_0 = symbols_new();
-        symbols_add(symbols_0, c);
-        new_base_0 = da_find_free_base(d, symbols_0);
-        symbols_free(symbols_0);
+        let mut symbols_0 = Symbols::default();
+        symbols_0.add(c);
+        new_base_0 = da_find_free_base(d, &symbols_0);
         if 0 as libc::c_int == new_base_0 {
             return TRIE_INDEX_ERROR;
         }
@@ -345,38 +280,32 @@ unsafe extern "C" fn da_has_children(mut d: *const DArray, mut s: TrieIndex) -> 
     }
     return FALSE as Bool;
 }
-#[no_mangle]
-pub unsafe extern "C" fn da_output_symbols(mut d: *const DArray, mut s: TrieIndex) -> *mut Symbols {
-    let mut syms: *mut Symbols = 0 as *mut Symbols;
-    let mut base: TrieIndex = 0;
-    let mut c: TrieIndex = 0;
-    let mut max_c: TrieIndex = 0;
-    syms = symbols_new();
-    base = da_get_base(d, s);
-    max_c = if (255 as libc::c_int) < (*d).num_cells - base {
-        255 as libc::c_int
-    } else {
-        (*d).num_cells - base
-    };
-    c = 0 as libc::c_int;
+
+pub(crate) unsafe fn da_output_symbols_rs(mut d: *const DArray, mut s: TrieIndex) -> Symbols {
+    let mut syms = Symbols::default();
+    let base = da_get_base(d, s);
+    let max_c = cmp::min(TrieChar::MAX as TrieIndex, (*d).num_cells - base);
+    let mut c = 0;
+    // TODO: Change while to for
     while c <= max_c {
         if da_get_check(d, base + c) == s {
-            let fresh0 = (*syms).num_symbols;
-            (*syms).num_symbols = (*syms).num_symbols + 1;
-            (*syms).symbols[fresh0 as usize] = c as TrieChar;
+            syms.add_fast(c as TrieChar);
         }
         c += 1;
-        c;
     }
-    return syms;
+    syms
 }
-unsafe extern "C" fn da_find_free_base(
-    mut d: *mut DArray,
-    mut symbols: *const Symbols,
-) -> TrieIndex {
+
+#[deprecated(note = "Use da_output_symbols_rs")]
+#[no_mangle]
+pub(crate) unsafe fn da_output_symbols(mut d: *const DArray, mut s: TrieIndex) -> *mut Symbols {
+    Box::into_raw(Box::new(da_output_symbols_rs(d, s)))
+}
+
+unsafe extern "C" fn da_find_free_base(mut d: *mut DArray, symbols: &Symbols) -> TrieIndex {
     let mut first_sym: TrieChar = 0;
     let mut s: TrieIndex = 0;
-    first_sym = symbols_get(symbols, 0 as libc::c_int);
+    first_sym = symbols.get(0).unwrap();
     s = -da_get_check(d, 1 as libc::c_int);
     while s != 1 as libc::c_int && s < first_sym as TrieIndex + DA_POOL_BEGIN {
         s = -da_get_check(d, s);
@@ -407,12 +336,12 @@ unsafe extern "C" fn da_find_free_base(
 unsafe extern "C" fn da_fit_symbols(
     mut d: *mut DArray,
     mut base: TrieIndex,
-    mut symbols: *const Symbols,
+    symbols: &Symbols,
 ) -> Bool {
     let mut i: libc::c_int = 0;
     i = 0 as libc::c_int;
-    while i < symbols_num(symbols) {
-        let mut sym: TrieChar = symbols_get(symbols, i);
+    while i < symbols.num() as i32 {
+        let mut sym: TrieChar = symbols.get(i as usize).unwrap();
         if base > TRIE_INDEX_MAX - sym as libc::c_int
             || da_check_free_cell(d, base + sym as libc::c_int) as u64 == 0
         {
@@ -429,17 +358,16 @@ unsafe extern "C" fn da_relocate_base(
     mut new_base: TrieIndex,
 ) {
     let mut old_base: TrieIndex = 0;
-    let mut symbols: *mut Symbols = 0 as *mut Symbols;
     let mut i: libc::c_int = 0;
     old_base = da_get_base(d, s);
-    symbols = da_output_symbols(d, s);
+    let symbols = da_output_symbols_rs(d, s);
     i = 0 as libc::c_int;
-    while i < symbols_num(symbols) {
+    while i < symbols.num() as i32 {
         let mut old_next: TrieIndex = 0;
         let mut new_next: TrieIndex = 0;
         let mut old_next_base: TrieIndex = 0;
-        old_next = old_base + symbols_get(symbols, i) as libc::c_int;
-        new_next = new_base + symbols_get(symbols, i) as libc::c_int;
+        old_next = old_base + symbols.get(i as usize).unwrap() as libc::c_int;
+        new_next = new_base + symbols.get(i as usize).unwrap() as libc::c_int;
         old_next_base = da_get_base(d, old_next);
         da_alloc_cell(d, new_next);
         da_set_check(d, new_next, s);
@@ -465,7 +393,6 @@ unsafe extern "C" fn da_relocate_base(
         i += 1;
         i;
     }
-    symbols_free(symbols);
     da_set_base(d, s, new_base);
 }
 unsafe extern "C" fn da_extend_pool(mut d: *mut DArray, mut to_index: TrieIndex) -> Bool {

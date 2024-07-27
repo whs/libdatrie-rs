@@ -11,6 +11,7 @@ pub mod alpha_map;
 pub mod darray;
 mod dstring;
 mod fileutils;
+mod symbols;
 pub mod tail;
 pub mod trie;
 pub mod trie_string;
