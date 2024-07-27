@@ -77,13 +77,13 @@ impl Tail {
         self.free_block(index);
     }
 
-    // Walk in tail with a string
-    //
-    // Walk in the tail data `t` at entry `s`, from given character position
-    // `*suffix_idx`, using `len` characters of given string `str`.
-    //
-    // Return position after the last successful walk and the
-    // total number of character successfully walked.
+    /// Walk in tail with a string
+    ///
+    /// Walk in the tail data `t` at entry `s`, from given character position
+    /// `*suffix_idx`, using `len` characters of given string `str`.
+    ///
+    /// Return position after the last successful walk and the
+    /// total number of character successfully walked.
     #[must_use]
     pub(crate) fn walk_str(&self, s: TrieIndex, suffix_idx: i16, str: &[TrieChar]) -> (i16, i32) {
         let Some(suffix) = self.get_suffix(s as usize) else {
@@ -108,11 +108,11 @@ impl Tail {
         (j as i16, i as i32)
     }
 
-    // Walk in tail with a character
-    //
-    // Walk in the tail data `t` at entry `s`, from given character position
-    // `*suffix_idx`, using given character `c`. If the walk is successful,
-    // it returns `Some(next_character_idx)`. Otherwise, it returns `None`
+    /// Walk in tail with a character
+    ///
+    /// Walk in the tail data `t` at entry `s`, from given character position
+    /// `*suffix_idx`, using given character `c`. If the walk is successful,
+    /// it returns `Some(next_character_idx)`. Otherwise, it returns `None`
     #[must_use]
     pub(crate) fn walk_char(&self, s: TrieIndex, suffix_idx: i16, c: TrieChar) -> Option<i16> {
         let suffix = self.get_suffix(s as usize)?;
@@ -410,7 +410,7 @@ pub(crate) extern "C" fn tail_set_data(
     }
 }
 
-// Delete suffix entry from the tail data.
+/// Delete suffix entry from the tail data.
 #[deprecated(note = "Use t.delete()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
@@ -418,12 +418,12 @@ pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
     tail.delete(index)
 }
 
-// Walk in tail with a string
-//
-// Walk in the tail data `t` at entry `s`, from given character position
-// `*suffix_idx`, using `len` characters of given string `str`. On return,
-// `*suffix_idx` is updated to the position after the last successful walk,
-// and the function returns the total number of character successfully walked.
+/// Walk in tail with a string
+///
+/// Walk in the tail data `t` at entry `s`, from given character position
+/// `*suffix_idx`, using `len` characters of given string `str`. On return,
+/// `*suffix_idx` is updated to the position after the last successful walk,
+/// and the function returns the total number of character successfully walked.
 #[deprecated(note = "Use (*suffix_idx, walked) = t.walk_str()")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_str(
@@ -440,12 +440,12 @@ pub(crate) unsafe extern "C" fn tail_walk_str(
     walked
 }
 
-// Walk in tail with a character
-//
-// Walk in the tail data `t` at entry `s`, from given character position
-// `*suffix_idx`, using given character `c`. If the walk is successful,
-// it returns `TRUE`, and `*suffix_idx` is updated to the next character.
-// Otherwise, it returns `FALSE`, and `*suffix_idx` is left unchanged.
+/// Walk in tail with a character
+///
+/// Walk in the tail data `t` at entry `s`, from given character position
+/// `*suffix_idx`, using given character `c`. If the walk is successful,
+/// it returns `TRUE`, and `*suffix_idx` is updated to the next character.
+/// Otherwise, it returns `FALSE`, and `*suffix_idx` is left unchanged.
 #[deprecated(note = "Use Some(*suffix_idx) = t.walk_char()")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_char(
