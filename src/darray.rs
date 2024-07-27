@@ -1,9 +1,10 @@
 use ::libc;
+use crate::fileutils::{file_read_int32, file_write_int32, serialize_int32_be_incr};
+use crate::trie::TRIE_INDEX_ERROR;
+use crate::trie_string::{trie_string_append_char, trie_string_cut_last, TrieChar, TrieString};
+use crate::types::*;
+
 extern "C" {
-    pub type _IO_wide_data;
-    pub type _IO_codecvt;
-    pub type _IO_marker;
-    pub type _TrieString;
     fn memmove(_: *mut libc::c_void, _: *const libc::c_void, _: libc::c_ulong)
         -> *mut libc::c_void;
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -11,127 +12,24 @@ extern "C" {
     fn free(_: *mut libc::c_void);
     fn fseek(__stream: *mut FILE, __off: libc::c_long, __whence: libc::c_int) -> libc::c_int;
     fn ftell(__stream: *mut FILE) -> libc::c_long;
-    fn trie_string_append_char(ts: *mut TrieString, tc: TrieChar) -> Bool;
-    fn trie_string_cut_last(ts: *mut TrieString) -> Bool;
-    fn serialize_int32_be_incr(buff: *mut *mut uint8, val: int32);
-    fn file_read_int32(file: *mut FILE, o_val: *mut int32) -> Bool;
-    fn file_write_int32(file: *mut FILE, val: int32) -> Bool;
 }
 pub type size_t = libc::c_ulong;
-pub type __uint16_t = libc::c_ushort;
-pub type __uint32_t = libc::c_uint;
-pub type __uint64_t = libc::c_ulong;
-pub type __off_t = libc::c_long;
-pub type __off64_t = libc::c_long;
+pub type FILE = libc::FILE;
+pub type uint8 = u8;
+pub type uint32 = u32;
+pub type int32 = i32;
+
+pub const SIZE_MAX: libc::c_ulong = 18446744073709551615 as libc::c_ulong;
+pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
+pub const NULL: libc::c_int = 0 as libc::c_int;
+
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: libc::c_int,
-    pub _IO_read_ptr: *mut libc::c_char,
-    pub _IO_read_end: *mut libc::c_char,
-    pub _IO_read_base: *mut libc::c_char,
-    pub _IO_write_base: *mut libc::c_char,
-    pub _IO_write_ptr: *mut libc::c_char,
-    pub _IO_write_end: *mut libc::c_char,
-    pub _IO_buf_base: *mut libc::c_char,
-    pub _IO_buf_end: *mut libc::c_char,
-    pub _IO_save_base: *mut libc::c_char,
-    pub _IO_backup_base: *mut libc::c_char,
-    pub _IO_save_end: *mut libc::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: libc::c_int,
-    pub _flags2: libc::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: libc::c_ushort,
-    pub _vtable_offset: libc::c_schar,
-    pub _shortbuf: [libc::c_char; 1],
-    pub _lock: *mut libc::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut libc::c_void,
-    pub __pad5: size_t,
-    pub _mode: libc::c_int,
-    pub _unused2: [libc::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-pub type Bool = libc::c_uint;
-pub const DA_TRUE: Bool = 1;
-pub const DA_FALSE: Bool = 0;
-pub type uint8 = libc::c_uchar;
-pub type uint32 = libc::c_uint;
-pub type int32 = libc::c_int;
-pub type TrieChar = libc::c_uchar;
-pub type TrieIndex = int32;
-pub type TrieString = _TrieString;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _Symbols {
+pub struct Symbols {
     pub num_symbols: libc::c_short,
     pub symbols: [TrieChar; 256],
 }
-pub type Symbols = _Symbols;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _DArray {
-    pub num_cells: TrieIndex,
-    pub cells: *mut DACell,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct DACell {
-    pub base: TrieIndex,
-    pub check: TrieIndex,
-}
-pub type DArray = _DArray;
-#[inline]
-unsafe extern "C" fn __bswap_16(mut __bsx: __uint16_t) -> __uint16_t {
-    return (__bsx as libc::c_int >> 8 as libc::c_int & 0xff as libc::c_int
-        | (__bsx as libc::c_int & 0xff as libc::c_int) << 8 as libc::c_int)
-        as __uint16_t;
-}
-#[inline]
-unsafe extern "C" fn __bswap_32(mut __bsx: __uint32_t) -> __uint32_t {
-    return (__bsx & 0xff000000 as libc::c_uint) >> 24 as libc::c_int
-        | (__bsx & 0xff0000 as libc::c_uint) >> 8 as libc::c_int
-        | (__bsx & 0xff00 as libc::c_uint) << 8 as libc::c_int
-        | (__bsx & 0xff as libc::c_uint) << 24 as libc::c_int;
-}
-#[inline]
-unsafe extern "C" fn __bswap_64(mut __bsx: __uint64_t) -> __uint64_t {
-    return ((__bsx as libc::c_ulonglong & 0xff00000000000000 as libc::c_ulonglong)
-        >> 56 as libc::c_int
-        | (__bsx as libc::c_ulonglong & 0xff000000000000 as libc::c_ulonglong) >> 40 as libc::c_int
-        | (__bsx as libc::c_ulonglong & 0xff0000000000 as libc::c_ulonglong) >> 24 as libc::c_int
-        | (__bsx as libc::c_ulonglong & 0xff00000000 as libc::c_ulonglong) >> 8 as libc::c_int
-        | (__bsx as libc::c_ulonglong & 0xff000000 as libc::c_ulonglong) << 8 as libc::c_int
-        | (__bsx as libc::c_ulonglong & 0xff0000 as libc::c_ulonglong) << 24 as libc::c_int
-        | (__bsx as libc::c_ulonglong & 0xff00 as libc::c_ulonglong) << 40 as libc::c_int
-        | (__bsx as libc::c_ulonglong & 0xff as libc::c_ulonglong) << 56 as libc::c_int)
-        as __uint64_t;
-}
-#[inline]
-unsafe extern "C" fn __uint16_identity(mut __x: __uint16_t) -> __uint16_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint32_identity(mut __x: __uint32_t) -> __uint32_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint64_identity(mut __x: __uint64_t) -> __uint64_t {
-    return __x;
-}
-pub const SIZE_MAX: libc::c_ulong = 18446744073709551615 as libc::c_ulong;
-pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
-pub const FALSE: libc::c_int = DA_FALSE as libc::c_int;
-pub const TRUE: libc::c_int = DA_TRUE as libc::c_int;
-pub const TRIE_INDEX_MAX: libc::c_int = 0x7fffffff as libc::c_int;
-pub const NULL: libc::c_int = 0 as libc::c_int;
-pub const TRIE_INDEX_ERROR: libc::c_int = 0 as libc::c_int;
+
 unsafe extern "C" fn symbols_new() -> *mut Symbols {
     let mut syms: *mut Symbols = 0 as *mut Symbols;
     syms = malloc(::core::mem::size_of::<Symbols>() as libc::c_ulong) as *mut Symbols;
@@ -141,10 +39,12 @@ unsafe extern "C" fn symbols_new() -> *mut Symbols {
     (*syms).num_symbols = 0 as libc::c_int as libc::c_short;
     return syms;
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn symbols_free(mut syms: *mut Symbols) {
     free(syms as *mut libc::c_void);
 }
+
 unsafe extern "C" fn symbols_add(mut syms: *mut Symbols, mut c: TrieChar) {
     let mut lower: libc::c_short = 0;
     let mut upper: libc::c_short = 0;
@@ -178,16 +78,34 @@ unsafe extern "C" fn symbols_add(mut syms: *mut Symbols, mut c: TrieChar) {
     (*syms).num_symbols += 1;
     (*syms).num_symbols;
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn symbols_num(mut syms: *const Symbols) -> libc::c_int {
     return (*syms).num_symbols as libc::c_int;
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn symbols_get(mut syms: *const Symbols, mut index: libc::c_int) -> TrieChar {
     return (*syms).symbols[index as usize];
 }
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct DArray {
+    pub num_cells: TrieIndex,
+    pub cells: *mut DACell,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct DACell {
+    pub base: TrieIndex,
+    pub check: TrieIndex,
+}
+
 pub const DA_SIGNATURE: libc::c_uint = 0xdafcdafc as libc::c_uint;
 pub const DA_POOL_BEGIN: libc::c_int = 3 as libc::c_int;
+
 #[no_mangle]
 pub unsafe extern "C" fn da_new() -> *mut DArray {
     let mut d: *mut DArray = 0 as *mut DArray;
@@ -221,15 +139,15 @@ pub unsafe extern "C" fn da_fread(mut file: *mut FILE) -> *mut DArray {
     let mut n: TrieIndex = 0;
     save_pos = ftell(file);
     if !(file_read_int32(file, &mut n) as u64 == 0 || DA_SIGNATURE != n as uint32) {
-        d = malloc(::core::mem::size_of::<DArray>() as libc::c_ulong) as *mut DArray;
+        d = malloc(size_of::<DArray>() as libc::c_ulong) as *mut DArray;
         if !d.is_null() {
             if !(file_read_int32(file, &mut (*d).num_cells) as u64 == 0) {
                 if !((*d).num_cells as libc::c_ulong
-                    > SIZE_MAX.wrapping_div(::core::mem::size_of::<DACell>() as libc::c_ulong))
+                    > SIZE_MAX.wrapping_div(size_of::<DACell>() as libc::c_ulong))
                 {
                     (*d).cells = malloc(
                         ((*d).num_cells as libc::c_ulong)
-                            .wrapping_mul(::core::mem::size_of::<DACell>() as libc::c_ulong),
+                            .wrapping_mul(size_of::<DACell>() as libc::c_ulong),
                     ) as *mut DACell;
                     if !((*d).cells).is_null() {
                         (*((*d).cells).offset(0 as libc::c_int as isize)).base =

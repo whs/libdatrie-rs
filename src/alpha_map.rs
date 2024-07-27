@@ -24,16 +24,9 @@ pub struct AlphaMap {
 pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
 
 impl AlphaMap {
-    pub fn add_range(&mut self, range: RangeInclusive<AlphaChar>) -> Option<()> {
-        // FIXME: Lazy type
-        if range.start() > range.end() {
-            return None;
-        }
-
+    pub fn add_range(&mut self, range: RangeInclusive<AlphaChar>) {
         self.ranges.insert(range);
-        self.recalc_work_area();
-
-        Some(())
+        self.recalc_work_area()
     }
 
     pub(crate) fn read<T: Read>(stream: &mut T) -> io::Result<Self> {
@@ -248,10 +241,8 @@ pub extern "C" fn alpha_map_add_range(
         return -1;
     }
     let am = unsafe { alpha_map.as_mut() };
-    match am.add_range(begin..=end) {
-        Some(_) => 0,
-        None => -1,
-    }
+    am.add_range(begin..=end);
+    0
 }
 
 #[deprecated(note = "Use alpha_map.char_to_trie()")]
