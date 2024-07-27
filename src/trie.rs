@@ -1,4 +1,5 @@
 use ::libc;
+use crate::types::*;
 
 extern "C" {
     pub type _IO_wide_data;
@@ -88,7 +89,6 @@ pub type uint32 = libc::c_uint;
 pub type int32 = libc::c_int;
 pub type AlphaChar = uint32;
 pub type TrieChar = libc::c_uchar;
-pub type TrieIndex = int32;
 pub type TrieData = int32;
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -161,7 +161,6 @@ pub type Symbols = _Symbols;
 pub const TRIE_DATA_ERROR: libc::c_int = -(1 as libc::c_int);
 pub const TRIE_INDEX_ERROR: libc::c_int = 0 as libc::c_int;
 pub const TRIE_CHAR_TERM: libc::c_int = '\0' as i32;
-pub const TRIE_INDEX_MAX: libc::c_int = 0x7fffffff as libc::c_int;
 pub const TRUE: libc::c_int = DA_TRUE as libc::c_int;
 pub const FALSE: libc::c_int = DA_FALSE as libc::c_int;
 pub const NULL: libc::c_int = 0 as libc::c_int;

@@ -1,42 +1,19 @@
 use std::{io, iter, ptr, slice};
-use std::cmp::Ordering;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use null_terminated::Nul;
 use rangemap::RangeInclusiveSet;
 
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
+use crate::types::*;
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
-}
-
-pub type TrieIndex = i32;
-pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
-
-pub type AlphaChar = u32;
-pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;
-
-#[no_mangle]
-pub extern "C" fn alpha_char_strlen(str: *const AlphaChar) -> i32 {
-    unsafe { Nul::new_unchecked(str) }.len() as i32
-}
-
-#[no_mangle]
-pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaChar) -> i32 {
-    let str1 = unsafe { Nul::new_unchecked(str1) };
-    let str2 = unsafe { Nul::new_unchecked(str2) };
-    match str1.cmp(str2) {
-        Ordering::Less => -1,
-        Ordering::Equal => 0,
-        Ordering::Greater => 1,
-    }
 }
 
 #[derive(Clone, Default)]

@@ -8,13 +8,13 @@ use crate::dstring::*;
 use crate::types::*;
 
 pub type TrieChar = u8;
+pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 
 #[derive(Clone)]
 #[repr(C)]
 pub struct TrieString {
     ds: DString,
 }
-pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 
 #[no_mangle]
 pub extern "C" fn trie_char_strlen(key: *const TrieChar) -> usize {
