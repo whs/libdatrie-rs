@@ -197,7 +197,7 @@ pub(crate) extern "C" fn alpha_map_fread_bin(file: NonNull<libc::FILE>) -> *mut 
     let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
 
     match AlphaMap::read(&mut file) {
-        Ok(am) => Box::into_raw(Box::new(am.clone())),
+        Ok(am) => Box::into_raw(Box::new(am)),
         Err(_) => {
             // Return to save_pos if read fail
             let _ = file.seek(SeekFrom::Start(save_pos));

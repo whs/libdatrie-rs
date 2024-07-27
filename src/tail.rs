@@ -1,9 +1,9 @@
 use std::{io, ptr, slice};
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
 
 use ::libc;
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::trie::{TRIE_DATA_ERROR, TRIE_INDEX_ERROR, TrieChar, TrieData};
@@ -15,21 +15,13 @@ extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn realloc(_: *mut libc::c_void, _: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
-    fn fseek(__stream: *mut FILE, __off: libc::c_long, __whence: libc::c_int) -> libc::c_int;
-    fn ftell(__stream: *mut FILE) -> libc::c_long;
-    fn file_read_int32(file: *mut FILE, o_val: *mut int32) -> Bool;
-    fn file_read_int16(file: *mut FILE, o_val: *mut int16) -> Bool;
-    fn file_read_chars(file: *mut FILE, buff: *mut libc::c_char, len: libc::c_int) -> Bool;
 }
 
-pub type size_t = libc::c_ulong;
-pub type FILE = libc::FILE;
-pub type int16 = libc::c_short;
-pub type uint32 = libc::c_uint;
-pub type int32 = libc::c_int;
-pub const SIZE_MAX: libc::c_ulong = 18446744073709551615 as libc::c_ulong;
-pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
-pub const NULL: libc::c_int = 0 as libc::c_int;
+type size_t = libc::c_ulong;
+type int16 = libc::c_short;
+type uint32 = libc::c_uint;
+type int32 = libc::c_int;
+const NULL: libc::c_int = 0 as libc::c_int;
 
 #[repr(C)]
 pub(crate) struct Tail {
@@ -77,6 +69,37 @@ impl Tail {
             }
             None => None,
         }
+    }
+
+    pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
+        if reader.read_u32::<BigEndian>()? != TAIL_SIGNATURE {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid signature"));
+        }
+        let mut tail = Self::default();
+        tail.first_free = reader.read_i32::<BigEndian>()?;
+        tail.num_tails =  reader.read_i32::<BigEndian>()?;
+
+        if tail.num_tails > (usize::MAX / size_of::<TailBlock>()) as i32 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "block count too large"));
+        }
+
+        // TODO: This leaks if this function fails. It should be fixed when the tail.tails type is safe
+        tail.tails = unsafe { malloc((tail.num_tails as usize * size_of::<TailBlock>()) as libc::c_ulong).cast() };
+        let blocks = tail.blocks_mut();
+
+        for block in blocks {
+            block.next_free = reader.read_i32::<BigEndian>()?;
+            block.data = reader.read_i32::<BigEndian>()?;
+
+            let length = reader.read_i16::<BigEndian>()?;
+            // TODO: This leaks if this function fails. It should be fixed when the tail.tails type is safe
+            block.suffix = unsafe { malloc((length + 1) as libc::c_ulong).cast() };
+            let suffix = unsafe { slice::from_raw_parts_mut(block.suffix, (length + 1) as usize) };
+            reader.read_exact(suffix)?;
+            suffix[length as usize] = TRIE_CHAR_TERM;
+        }
+
+        Ok(tail)
     }
 
     pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
@@ -142,102 +165,20 @@ pub(crate) extern "C" fn tail_new() -> *mut Tail {
     Box::into_raw(Box::new(Tail::default()))
 }
 
+#[deprecated(note = "Use Tail::read(). Careful about file position on failure!")]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_fread(mut file: *mut FILE) -> *mut Tail {
-    let mut current_block: u64;
-    let mut save_pos: libc::c_long = 0;
-    let mut t: *mut Tail = 0 as *mut Tail;
-    let mut i: TrieIndex = 0;
-    let mut sig: uint32 = 0;
-    save_pos = ftell(file);
-    if !(file_read_int32(file, &mut sig as *mut uint32 as *mut int32) as u64 == 0
-        || TAIL_SIGNATURE != sig)
-    {
-        t = malloc(::core::mem::size_of::<Tail>() as libc::c_ulong) as *mut Tail;
-        if !t.is_null() {
-            if !(file_read_int32(file, &mut (*t).first_free) as u64 == 0
-                || file_read_int32(file, &mut (*t).num_tails) as u64 == 0)
-            {
-                if !((*t).num_tails as libc::c_ulong
-                    > SIZE_MAX.wrapping_div(::core::mem::size_of::<TailBlock>() as libc::c_ulong))
-                {
-                    (*t).tails = malloc(
-                        ((*t).num_tails as libc::c_ulong)
-                            .wrapping_mul(::core::mem::size_of::<TailBlock>() as libc::c_ulong),
-                    ) as *mut TailBlock;
-                    if !((*t).tails).is_null() {
-                        i = 0 as libc::c_int;
-                        loop {
-                            if !(i < (*t).num_tails) {
-                                current_block = 15904375183555213903;
-                                break;
-                            }
-                            let mut length: int16 = 0;
-                            if file_read_int32(
-                                file,
-                                &mut (*((*t).tails).offset(i as isize)).next_free,
-                            ) as u64
-                                == 0
-                                || file_read_int32(
-                                    file,
-                                    &mut (*((*t).tails).offset(i as isize)).data,
-                                ) as u64
-                                    == 0
-                                || file_read_int16(file, &mut length) as u64 == 0
-                            {
-                                current_block = 3120876903627340905;
-                                break;
-                            }
-                            let ref mut fresh0 = (*((*t).tails).offset(i as isize)).suffix;
-                            *fresh0 =
-                                malloc((length as libc::c_int + 1 as libc::c_int) as libc::c_ulong)
-                                    as *mut TrieChar;
-                            if ((*((*t).tails).offset(i as isize)).suffix).is_null() {
-                                current_block = 3120876903627340905;
-                                break;
-                            }
-                            if length as libc::c_int > 0 as libc::c_int {
-                                if file_read_chars(
-                                    file,
-                                    (*((*t).tails).offset(i as isize)).suffix as *mut libc::c_char,
-                                    length as libc::c_int,
-                                ) as u64
-                                    == 0
-                                {
-                                    free(
-                                        (*((*t).tails).offset(i as isize)).suffix
-                                            as *mut libc::c_void,
-                                    );
-                                    current_block = 3120876903627340905;
-                                    break;
-                                }
-                            }
-                            *((*((*t).tails).offset(i as isize)).suffix).offset(length as isize) =
-                                TRIE_CHAR_TERM as TrieChar;
-                            i += 1;
-                            i;
-                        }
-                        match current_block {
-                            15904375183555213903 => return t,
-                            _ => {
-                                while i > 0 as libc::c_int {
-                                    i -= 1;
-                                    free(
-                                        (*((*t).tails).offset(i as isize)).suffix
-                                            as *mut libc::c_void,
-                                    );
-                                }
-                                free((*t).tails as *mut libc::c_void);
-                            }
-                        }
-                    }
-                }
-            }
-            free(t as *mut libc::c_void);
+pub(crate) extern "C" fn tail_fread(mut file: NonNull<libc::FILE>) -> *mut Tail {
+    let mut file = wrap_cfile_nonnull(file);
+    let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
+
+    match Tail::read(&mut file) {
+        Ok(tail) => Box::into_raw(Box::new(tail)),
+        Err(_) => {
+            // Return to save_pos if read fail
+            let _ = file.seek(SeekFrom::Start(save_pos));
+            return ptr::null_mut();
         }
     }
-    fseek(file, save_pos, SEEK_SET);
-    return NULL as *mut Tail;
 }
 
 #[no_mangle]
