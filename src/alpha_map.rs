@@ -12,7 +12,6 @@ use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
 use crate::types::*;
 
 #[derive(Clone, Default)]
-#[repr(C)]
 pub struct AlphaMap {
     alpha_begin: AlphaChar,
     alpha_end: AlphaChar,

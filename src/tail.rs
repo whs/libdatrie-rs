@@ -10,14 +10,7 @@ use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR};
 use crate::trie_string::{trie_char_clone, TRIE_CHAR_TERM};
 use crate::types::*;
 
-type size_t = libc::c_ulong;
-type int16 = libc::c_short;
-type uint32 = libc::c_uint;
-type int32 = libc::c_int;
-const NULL: libc::c_int = 0 as libc::c_int;
-
 #[derive(Default)]
-#[repr(C)]
 pub(crate) struct Tail {
     tails: Vec<TailBlock>,
     first_free: TrieIndex,

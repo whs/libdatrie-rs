@@ -4,8 +4,7 @@ use std::mem::MaybeUninit;
 use std::slice;
 
 #[derive(Clone)]
-#[repr(C)]
-pub struct DString {
+pub(crate) struct DString {
     char_size: usize,
     str_len: usize,
     // Don't trust val.len(), use str_len * char_size for actual contents
@@ -14,7 +13,7 @@ pub struct DString {
 
 #[must_use]
 #[no_mangle]
-pub extern "C" fn dstring_new(char_size: i32, n_elm: i32) -> *mut DString {
+pub(crate) extern "C" fn dstring_new(char_size: i32, n_elm: i32) -> *mut DString {
     let dstring = DString {
         char_size: char_size as usize,
         str_len: 0,
@@ -24,29 +23,29 @@ pub extern "C" fn dstring_new(char_size: i32, n_elm: i32) -> *mut DString {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dstring_free(ds: *mut DString) {
+pub(crate) unsafe extern "C" fn dstring_free(ds: *mut DString) {
     let dstring = Box::from_raw(ds);
     drop(dstring) // This is not strictly needed, but it help in clarity
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_length(ds: *const DString) -> i32 {
+pub(crate) extern "C" fn dstring_length(ds: *const DString) -> i32 {
     let ds = unsafe { &*ds };
     ds.str_len as i32
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_get_val(ds: *const DString) -> *const libc::c_void {
+pub(crate) extern "C" fn dstring_get_val(ds: *const DString) -> *const libc::c_void {
     unsafe { (*ds).val.as_ptr().cast() }
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_get_val_rw(ds: *mut DString) -> *mut libc::c_void {
+pub(crate) extern "C" fn dstring_get_val_rw(ds: *mut DString) -> *mut libc::c_void {
     unsafe { (*ds).val.as_mut_ptr().cast() }
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_clear(ds: *mut DString) {
+pub(crate) extern "C" fn dstring_clear(ds: *mut DString) {
     unsafe {
         (*ds).str_len = 0;
     }
@@ -54,7 +53,7 @@ pub extern "C" fn dstring_clear(ds: *mut DString) {
 
 #[no_mangle]
 #[must_use]
-pub extern "C" fn dstring_copy(dst: *mut DString, src: *const DString) -> Bool {
+pub(crate) extern "C" fn dstring_copy(dst: *mut DString, src: *const DString) -> Bool {
     let dst = unsafe { &mut *dst };
     let src = unsafe { &*src };
 
@@ -69,7 +68,7 @@ pub extern "C" fn dstring_copy(dst: *mut DString, src: *const DString) -> Bool {
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_append(dst: *mut DString, src: *const DString) -> Bool {
+pub(crate) extern "C" fn dstring_append(dst: *mut DString, src: *const DString) -> Bool {
     let dst = unsafe { &mut *dst };
     let src = unsafe { &*src };
 
@@ -96,7 +95,7 @@ pub extern "C" fn dstring_append(dst: *mut DString, src: *const DString) -> Bool
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_append_string(
+pub(crate) extern "C" fn dstring_append_string(
     ds: *mut DString,
     data: *const libc::c_void,
     len: i32,
@@ -123,7 +122,7 @@ pub extern "C" fn dstring_append_string(
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc::c_void) -> Bool {
+pub(crate) extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc::c_void) -> Bool {
     let ds = unsafe { &mut *ds };
     let data = unsafe { slice::from_raw_parts(data.cast(), ds.char_size) };
 
@@ -144,7 +143,7 @@ pub extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc::c_voi
     TRUE
 }
 #[no_mangle]
-pub extern "C" fn dstring_terminate(ds: *mut DString) -> Bool {
+pub(crate) extern "C" fn dstring_terminate(ds: *mut DString) -> Bool {
     let ds = unsafe { &mut *ds };
     ds.val
         .resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
@@ -162,7 +161,7 @@ pub extern "C" fn dstring_terminate(ds: *mut DString) -> Bool {
 }
 
 #[no_mangle]
-pub extern "C" fn dstring_cut_last(ds: *mut DString) -> Bool {
+pub(crate) extern "C" fn dstring_cut_last(ds: *mut DString) -> Bool {
     let ds = unsafe { &mut *ds };
 
     if ds.str_len == 0 {

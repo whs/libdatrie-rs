@@ -1,5 +1,5 @@
 use std::cmp;
-
+use std::ptr::NonNull;
 use ::libc;
 
 use crate::fileutils::{file_read_int32, file_write_int32, serialize_int32_be_incr};
@@ -27,22 +27,29 @@ pub const SIZE_MAX: libc::c_ulong = 18446744073709551615 as libc::c_ulong;
 pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
 pub const NULL: libc::c_int = 0 as libc::c_int;
 
-#[derive(Copy, Clone)]
 #[repr(C)]
-pub struct DArray {
-    pub num_cells: TrieIndex,
-    pub cells: *mut DACell,
+pub(crate) struct DACell {
+    base: TrieIndex,
+    check: TrieIndex,
 }
 
-#[derive(Copy, Clone)]
 #[repr(C)]
-pub struct DACell {
-    pub base: TrieIndex,
-    pub check: TrieIndex,
+pub(crate) struct DArray {
+    num_cells: TrieIndex,
+    // This should be Vec
+    cells: *mut DACell,
 }
 
-pub const DA_SIGNATURE: libc::c_uint = 0xdafcdafc as libc::c_uint;
-pub const DA_POOL_BEGIN: libc::c_int = 3 as libc::c_int;
+pub(crate) const DA_SIGNATURE: u32 = 0xdafcdafc;
+pub(crate) const DA_POOL_BEGIN: TrieIndex = 3;
+
+impl Drop for DArray {
+    fn drop(&mut self) {
+        unsafe {
+            free(self.cells.cast());
+        }
+    }
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn da_new() -> *mut DArray {
@@ -128,11 +135,12 @@ pub unsafe extern "C" fn da_fread(mut file: *mut FILE) -> *mut DArray {
     fseek(file, save_pos, SEEK_SET);
     return NULL as *mut DArray;
 }
+
 #[no_mangle]
-pub unsafe extern "C" fn da_free(mut d: *mut DArray) {
-    free((*d).cells as *mut libc::c_void);
-    free(d as *mut libc::c_void);
+pub(crate) unsafe extern "C" fn da_free(mut d: NonNull<DArray>) {
+    drop(Box::from_raw(d.as_mut()))
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn da_fwrite(mut d: *const DArray, mut file: *mut FILE) -> libc::c_int {
     let mut i: TrieIndex = 0;

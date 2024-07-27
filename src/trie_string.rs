@@ -11,7 +11,6 @@ pub type TrieChar = u8;
 pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 
 #[derive(Clone)]
-#[repr(C)]
 pub struct TrieString {
     ds: DString,
 }
@@ -48,7 +47,7 @@ pub extern "C" fn trie_char_strdup(str: *const TrieChar) -> *mut TrieChar {
 }
 
 #[no_mangle]
-pub extern "C" fn trie_string_new(n_elm: libc::c_int) -> *mut TrieString {
+pub extern "C" fn trie_string_new(n_elm: i32) -> *mut TrieString {
     dstring_new(size_of::<TrieChar>() as i32, n_elm).cast()
 }
 #[no_mangle]
