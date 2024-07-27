@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use crate::types::*;
 use libc;
 use std::slice;
@@ -8,7 +9,7 @@ pub struct DString {
     char_size: usize,
     str_len: usize,
     // Don't trust val.len(), use str_len * char_size for actual contents
-    val: Vec<u8>,
+    val: Vec<MaybeUninit<u8>>,
 }
 
 #[must_use]
@@ -17,7 +18,7 @@ pub extern "C" fn dstring_new(char_size: i32, n_elm: i32) -> *mut DString {
     let dstring = DString {
         char_size: char_size as usize,
         str_len: 0,
-        val: vec![0; (char_size * n_elm) as usize],
+        val: vec![MaybeUninit::uninit(); (char_size * n_elm) as usize],
     };
     Box::into_raw(Box::new(dstring))
 }
@@ -58,7 +59,7 @@ pub extern "C" fn dstring_copy(dst: *mut DString, src: *const DString) -> Bool {
     let src = unsafe { &*src };
 
     // Unlike clone() this should not reallocate if not necessary
-    dst.val.resize(src.val.len(), 0);
+    dst.val.resize(src.val.len(), MaybeUninit::uninit());
     dst.val.copy_from_slice(&src.val);
 
     dst.char_size = src.char_size;
@@ -77,7 +78,7 @@ pub extern "C" fn dstring_append(dst: *mut DString, src: *const DString) -> Bool
     }
 
     dst.val
-        .resize((dst.str_len + src.str_len + 1) * dst.char_size, 0);
+        .resize((dst.str_len + src.str_len + 1) * dst.char_size, MaybeUninit::uninit());
 
     for (dchr, schr) in dst
         .val
@@ -102,7 +103,7 @@ pub extern "C" fn dstring_append_string(
     let data = unsafe { slice::from_raw_parts(data.cast(), ds.char_size * len as usize) };
 
     ds.val
-        .resize((ds.str_len + len as usize + 1) * ds.char_size, 0);
+        .resize((ds.str_len + len as usize + 1) * ds.char_size, MaybeUninit::uninit());
 
     for (dchr, schr) in ds
         .val
@@ -122,7 +123,7 @@ pub extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc::c_voi
     let ds = unsafe { &mut *ds };
     let data = unsafe { slice::from_raw_parts(data.cast(), ds.char_size) };
 
-    ds.val.resize((ds.str_len + 2) * ds.char_size, 0);
+    ds.val.resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
 
     for (dst, src) in ds
         .val
@@ -140,7 +141,7 @@ pub extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc::c_voi
 #[no_mangle]
 pub extern "C" fn dstring_terminate(ds: *mut DString) -> Bool {
     let ds = unsafe { &mut *ds };
-    ds.val.resize((ds.str_len + 2) * ds.char_size, 0);
+    ds.val.resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
 
     for dchar in ds
         .val
@@ -148,7 +149,7 @@ pub extern "C" fn dstring_terminate(ds: *mut DString) -> Bool {
         .skip(ds.char_size * ds.str_len)
         .take(ds.char_size)
     {
-        *dchar = 0;
+        *dchar = MaybeUninit::new(0);
     }
 
     TRUE
