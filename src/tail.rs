@@ -1,12 +1,12 @@
+use std::{io, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
-use std::{io, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR, TRIE_INDEX_ERROR};
+use crate::trie::{TRIE_DATA_ERROR, TrieChar, TrieData};
 use crate::trie_string::{trie_char_clone, TRIE_CHAR_TERM};
 use crate::types::*;
 
@@ -16,6 +16,7 @@ type uint32 = libc::c_uint;
 type int32 = libc::c_int;
 const NULL: libc::c_int = 0 as libc::c_int;
 
+#[derive(Default)]
 #[repr(C)]
 pub(crate) struct Tail {
     tails: Vec<TailBlock>,
@@ -44,6 +45,26 @@ impl Tail {
         }
     }
 
+    pub(crate) fn set_suffix(&mut self, index: TrieIndex, suffix: Option<Box<[TrieChar]>>) -> bool {
+        let index = (index - TAIL_START_BLOCKNO) as usize;
+
+        if index >= self.tails.len() {
+            return false;
+        }
+
+        self.tails[index].suffix = suffix;
+        true
+    }
+
+    pub(crate) fn add_suffix(
+        &mut self,
+        suffix: Option<Box<[TrieChar]>>,
+    ) -> TrieIndex {
+        let new_block = self.alloc_block();
+        self.set_suffix(new_block, suffix);
+        new_block
+    }
+
     pub(crate) fn get_data(&self, index: usize) -> Option<TrieData> {
         let index = index - TAIL_START_BLOCKNO as usize;
         self.tails.get(index).map(|v| v.data)
@@ -57,6 +78,108 @@ impl Tail {
                 Some(())
             }
             None => None,
+        }
+    }
+
+    pub(crate) fn delete(&mut self, index: TrieIndex) {
+        self.free_block(index);
+    }
+
+    // Walk in tail with a string
+    //
+    // Walk in the tail data `t` at entry `s`, from given character position
+    // `*suffix_idx`, using `len` characters of given string `str`.
+    //
+    // Return position after the last successful walk and the
+    // total number of character successfully walked.
+    #[must_use]
+    pub(crate) fn walk_str(
+        &self,
+        s: TrieIndex,
+        suffix_idx: i16,
+        str: &[TrieChar],
+    ) -> (i16, i32) {
+        let Some(suffix) = self.get_suffix(s as usize) else {
+            return (suffix_idx, 0);
+        };
+
+        let mut i = 0;
+        let mut j = suffix_idx as usize;
+        while i < str.len() {
+            if str[i] != suffix[j] {
+                break;
+            }
+            i += 1;
+
+            // stop and stay at null-terminator
+            if suffix[j] == TRIE_CHAR_TERM {
+                break;
+            }
+            j += 1;
+        }
+
+        (j as i16, i as i32)
+    }
+
+    // Walk in tail with a character
+    //
+    // Walk in the tail data `t` at entry `s`, from given character position
+    // `*suffix_idx`, using given character `c`. If the walk is successful,
+    // it returns `Some(next_character_idx)`. Otherwise, it returns `None`
+    #[must_use]
+    pub(crate) fn walk_char(
+        &self,
+        s: TrieIndex,
+        suffix_idx: i16,
+        c: TrieChar,
+    ) -> Option<i16> {
+        let suffix = self.get_suffix(s as usize)?;
+        let suffix_char = suffix[suffix_idx as usize];
+        if suffix_char == c {
+            if TRIE_CHAR_TERM != suffix_char {
+                return Some(suffix_idx + 1);
+            }
+            return Some(suffix_idx);
+        }
+        None
+    }
+
+    fn alloc_block(&mut self) -> TrieIndex {
+        let mut block_idx;
+        if self.first_free != 0 {
+            block_idx = self.first_free;
+            self.first_free = self.tails[block_idx as usize].next_free;
+
+            self.tails[block_idx as usize].reset();
+        } else {
+            block_idx = self.tails.len() as TrieIndex;
+            self.tails.push(TailBlock::default());
+        }
+
+        block_idx + TAIL_START_BLOCKNO
+    }
+
+    fn free_block(&mut self, block: TrieIndex) {
+        let block_idx = (block - TAIL_START_BLOCKNO) as usize;
+
+        // find insertion point
+        let mut j = 0;
+        let mut i = self.first_free as usize;
+        while i != 0 && i < block_idx {
+            j = i;
+            i = self.tails[i].next_free as usize;
+        }
+
+        let Some(block) = self.tails.get_mut(block_idx) else {
+            return;
+        };
+        block.reset();
+        block.next_free = i as TrieIndex;
+
+        if j != 0 {
+            self.tails[j].next_free = block_idx as TrieIndex;
+        } else {
+            self.first_free = block_idx as TrieIndex;
         }
     }
 
@@ -141,15 +264,6 @@ impl Tail {
             + self.tails.iter().map(|block| {
             block.suffix.as_ref().map(|suffix| suffix.len() - 1).unwrap_or(0)
         }).sum::<usize>()
-    }
-}
-
-impl Default for Tail {
-    fn default() -> Self {
-        Tail {
-            tails: Vec::new(),
-            first_free: 0,
-        }
     }
 }
 
@@ -253,86 +367,34 @@ pub(crate) extern "C" fn tail_get_suffix(
     }
 }
 
+#[deprecated(note = "Use tail.set_suffix()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_set_suffix(
     mut t: NonNull<Tail>,
     index: TrieIndex,
     suffix: *const TrieChar,
 ) -> Bool {
-    // TODO: Move into the struct
-    let index = (index - TAIL_START_BLOCKNO) as usize;
     let tail = unsafe { t.as_mut() };
-
-    if index >= tail.tails.len() {
-        return FALSE;
-    }
-
     let suffix = unsafe { suffix.as_ref() }.map(|v| trie_char_clone(v));
-
-    tail.tails[index].suffix = suffix;
-
-    TRUE
+    match tail.set_suffix(index, suffix) {
+        true => TRUE,
+        false => FALSE,
+    }
 }
 
+#[deprecated(note = "Clone the input into Rust and use tail.add_suffix().")]
 #[no_mangle]
-pub(crate) extern "C" fn tail_add_suffix(
+pub(crate) unsafe extern "C" fn tail_add_suffix(
     mut t: NonNull<Tail>,
     suffix: *const TrieChar,
 ) -> TrieIndex {
-    // TODO: Move into the struct
-    let mut new_block: TrieIndex = 0;
-    new_block = tail_alloc_block(t);
-    if 0 as libc::c_int == new_block {
-        return TRIE_INDEX_ERROR;
-    }
-    tail_set_suffix(t, new_block, suffix);
-    return new_block;
+    let tail = t.as_mut();
+    let suffix = unsafe { suffix.as_ref() }.map(|v| trie_char_clone(v));
+
+    tail.add_suffix(suffix)
 }
 
-fn tail_alloc_block(mut t: NonNull<Tail>) -> TrieIndex {
-    // TODO: Move into the struct
-    let mut tail = unsafe { t.as_mut() };
-
-    let mut block_idx;
-    if tail.first_free != 0 {
-        block_idx = tail.first_free;
-        tail.first_free = tail.tails[block_idx as usize].next_free;
-
-        tail.tails[block_idx as usize].reset();
-    } else {
-        block_idx = tail.tails.len() as TrieIndex;
-        tail.tails.push(TailBlock::default());
-    }
-
-    block_idx + TAIL_START_BLOCKNO
-}
-
-fn tail_free_block(mut t: NonNull<Tail>, block: TrieIndex) {
-    let block_idx = (block - TAIL_START_BLOCKNO) as usize;
-    let tail = unsafe { t.as_mut() };
-
-    // find insertion point
-    let mut j = 0;
-    let mut i = tail.first_free as usize;
-    while i != 0 && i < block_idx {
-        j = i;
-        i = tail.tails[i].next_free as usize;
-    }
-
-    let Some(block) = tail.tails.get_mut(block_idx) else {
-        return;
-    };
-    block.reset();
-    block.next_free = i as TrieIndex;
-
-    if j != 0 {
-        tail.tails[j].next_free = block_idx as TrieIndex;
-    } else {
-        tail.first_free = block_idx as TrieIndex;
-    }
-}
-
-#[deprecated = "Use t.get_data().unwrap_or(TRIE_DATA_ERROR)"]
+#[deprecated(note="Use t.get_data().unwrap_or(TRIE_DATA_ERROR)")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_get_data(mut t: *const Tail, mut index: TrieIndex) -> TrieData {
     let tail = unsafe { &*t };
@@ -342,7 +404,7 @@ pub(crate) extern "C" fn tail_get_data(mut t: *const Tail, mut index: TrieIndex)
     }
 }
 
-#[deprecated = "Use t.set_data()"]
+#[deprecated(note="Use t.set_data()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_set_data(
     mut t: NonNull<Tail>,
@@ -357,10 +419,11 @@ pub(crate) extern "C" fn tail_set_data(
 }
 
 // Delete suffix entry from the tail data.
+#[deprecated(note="Use t.delete()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
-    // TODO: Move into the struct
-    tail_free_block(t, index);
+    let tail = unsafe { t.as_mut() };
+    tail.delete(index)
 }
 
 // Walk in tail with a string
@@ -369,6 +432,7 @@ pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
 // `*suffix_idx`, using `len` characters of given string `str`. On return,
 // `*suffix_idx` is updated to the position after the last successful walk,
 // and the function returns the total number of character successfully walked.
+#[deprecated(note="Use (*suffix_idx, walked) = t.walk_str()")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_str(
     t: *const Tail,
@@ -377,30 +441,11 @@ pub(crate) unsafe extern "C" fn tail_walk_str(
     str: *const TrieChar,
     len: i32,
 ) -> i32 {
-    // TODO: Move into the struct
     let tail = unsafe { &*t };
-    let Some(suffix) = tail.get_suffix(s as usize) else {
-        return FALSE as libc::c_int;
-    };
     let str = slice::from_raw_parts(str, len as usize);
-
-    let mut i = 0;
-    let mut j = *suffix_idx as usize;
-    while i < str.len() {
-        if str[i] != suffix[j] {
-            break;
-        }
-        i += 1;
-
-        // stop and stay at null-terminator
-        if suffix[j] == TRIE_CHAR_TERM {
-            break;
-        }
-        j += 1;
-    }
-    *suffix_idx = j as i16;
-
-    i as i32
+    let (idx, walked) = tail.walk_str(s, *suffix_idx, str);
+    *suffix_idx = idx;
+    walked
 }
 
 // Walk in tail with a character
@@ -409,6 +454,7 @@ pub(crate) unsafe extern "C" fn tail_walk_str(
 // `*suffix_idx`, using given character `c`. If the walk is successful,
 // it returns `TRUE`, and `*suffix_idx` is updated to the next character.
 // Otherwise, it returns `FALSE`, and `*suffix_idx` is left unchanged.
+#[deprecated(note="Use Some(*suffix_idx) = t.walk_char()")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_char(
     t: *const Tail,
@@ -417,15 +463,12 @@ pub(crate) unsafe extern "C" fn tail_walk_char(
     c: TrieChar,
 ) -> Bool {
     let tail = unsafe { &*t };
-    let Some(suffix) = tail.get_suffix(s as usize) else {
-        return FALSE;
-    };
-    let suffix_char = suffix[*suffix_idx as usize];
-    if suffix_char == c {
-        if TRIE_CHAR_TERM != suffix_char {
-            *suffix_idx += 1;
+
+    match tail.walk_char(s, *suffix_idx, c) {
+        Some(idx) => {
+            *suffix_idx = idx;
+            TRUE
         }
-        return TRUE;
+        None => FALSE
     }
-    FALSE
 }
