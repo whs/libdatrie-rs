@@ -10,6 +10,7 @@ pub const TRUE: Bool = DA_TRUE;
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
+pub const TRIE_INDEX_ERROR: TrieIndex = 0;
 
 pub type AlphaChar = u32;
 pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;

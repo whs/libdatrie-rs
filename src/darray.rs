@@ -1,13 +1,12 @@
-use std::io::{Read, Seek, SeekFrom};
-use std::ptr::NonNull;
 use std::{cmp, io, ptr, slice};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::ptr::NonNull;
 
 use ::libc;
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::fileutils::{file_write_int32, serialize_int32_be_incr, wrap_cfile_nonnull};
+use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
-use crate::trie::TRIE_INDEX_ERROR;
 use crate::trie_string::{trie_string_append_char, trie_string_cut_last, TrieChar, TrieString};
 use crate::types::*;
 
@@ -17,18 +16,7 @@ extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn realloc(_: *mut libc::c_void, _: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
-    fn fseek(__stream: *mut FILE, __off: libc::c_long, __whence: libc::c_int) -> libc::c_int;
-    fn ftell(__stream: *mut FILE) -> libc::c_long;
 }
-pub type size_t = libc::c_ulong;
-pub type FILE = libc::FILE;
-pub type uint8 = u8;
-pub type uint32 = u32;
-pub type int32 = i32;
-
-pub const SIZE_MAX: libc::c_ulong = 18446744073709551615 as libc::c_ulong;
-pub const SEEK_SET: libc::c_int = 0 as libc::c_int;
-pub const NULL: libc::c_int = 0 as libc::c_int;
 
 #[repr(C)]
 pub(crate) struct DACell {
@@ -53,8 +41,16 @@ pub(crate) const DA_SIGNATURE: u32 = 0xdafcdafc;
 pub(crate) const DA_POOL_BEGIN: TrieIndex = 3;
 
 impl DArray {
+    fn slice(&self) -> &[DACell] {
+        unsafe { slice::from_raw_parts(self.cells, self.num_cells as usize) }
+    }
+
+    fn slice_mut(&self) -> &mut [DACell] {
+        unsafe { slice::from_raw_parts_mut(self.cells, self.num_cells as usize) }
+    }
+
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
-        if reader.read_u32::<BigEndian>()? != DA_SIGNATURE {
+        if reader.read_i32::<BigEndian>()? != DA_SIGNATURE as i32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid signature",
@@ -83,21 +79,25 @@ impl DArray {
 
         Ok(Self { num_cells, cells })
     }
+
+    pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
+        for cell in self.slice() {
+            writer.write_i32::<BigEndian>(cell.base)?;
+            writer.write_i32::<BigEndian>(cell.check)?;
+        }
+        Ok(())
+    }
 }
 
 impl Default for DArray {
     fn default() -> Self {
-        let mut d = Self {
-            num_cells: DA_POOL_BEGIN,
-            cells: ptr::null_mut(),
-        };
-
-        d.cells =
-            unsafe { malloc((d.num_cells as usize * size_of::<DACell>()) as libc::c_ulong).cast() };
-        let cells = unsafe { slice::from_raw_parts_mut(d.cells, d.num_cells as usize) };
+        let len = DA_POOL_BEGIN;
+        let cells_ptr: *mut DACell =
+            unsafe { malloc((len as usize * size_of::<DACell>()) as libc::c_ulong).cast() };
+        let cells = unsafe { slice::from_raw_parts_mut(cells_ptr, len as usize) };
 
         cells[0].base = DA_SIGNATURE as TrieIndex;
-        cells[0].check = d.num_cells;
+        cells[0].check = len;
 
         cells[1].base = -1;
         cells[1].check = -1;
@@ -105,7 +105,10 @@ impl Default for DArray {
         cells[2].base = DA_POOL_BEGIN;
         cells[2].check = 0;
 
-        d
+        Self {
+            num_cells: DA_POOL_BEGIN,
+            cells: cells_ptr,
+        }
     }
 }
 
@@ -117,14 +120,15 @@ impl Drop for DArray {
     }
 }
 
+#[deprecated(note = "Use DArray::default()")]
 #[no_mangle]
-pub extern "C" fn da_new() -> *mut DArray {
+pub(crate) extern "C" fn da_new() -> *mut DArray {
     Box::into_raw(Box::new(DArray::default()))
 }
 
-#[deprecated(note = "Use DArray::read()")]
+#[deprecated(note = "Use DArray::read(). Careful about file position on failure!")]
 #[no_mangle]
-pub extern "C" fn da_fread(mut file: NonNull<libc::FILE>) -> *mut DArray {
+pub(crate) extern "C" fn da_fread(mut file: NonNull<libc::FILE>) -> *mut DArray {
     let mut file = wrap_cfile_nonnull(file);
     let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
 
@@ -143,24 +147,21 @@ pub(crate) unsafe extern "C" fn da_free(mut d: NonNull<DArray>) {
     drop(Box::from_raw(d.as_mut()))
 }
 
+#[deprecated(note = "Use DArray::serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn da_fwrite(mut d: *const DArray, mut file: *mut FILE) -> libc::c_int {
-    let mut i: TrieIndex = 0;
-    i = 0 as libc::c_int;
-    while i < (*d).num_cells {
-        if file_write_int32(file, (*((*d).cells).offset(i as isize)).base) as u64 == 0
-            || file_write_int32(file, (*((*d).cells).offset(i as isize)).check) as u64 == 0
-        {
-            return -(1 as libc::c_int);
-        }
-        i += 1;
-        i;
+pub(crate) extern "C" fn da_fwrite(d: *const DArray, mut file: NonNull<libc::FILE>) -> i32 {
+    let mut file = wrap_cfile_nonnull(file);
+
+    let da = unsafe { &*d };
+
+    match da.serialize(&mut file) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    return 0 as libc::c_int;
 }
 
 #[no_mangle]
-pub extern "C" fn da_get_serialized_size(d: *const DArray) -> usize {
+pub(crate) extern "C" fn da_get_serialized_size(d: *const DArray) -> usize {
     // TODO: Move into the struct
     let da = unsafe { &*d };
     if da.num_cells > 0 {
@@ -170,16 +171,14 @@ pub extern "C" fn da_get_serialized_size(d: *const DArray) -> usize {
     }
 }
 
+#[deprecated(note = "Use DArray::serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn da_serialize(mut d: *const DArray, mut ptr: *mut *mut uint8) {
-    let mut i: TrieIndex = 0;
-    i = 0 as libc::c_int;
-    while i < (*d).num_cells {
-        serialize_int32_be_incr(ptr, (*((*d).cells).offset(i as isize)).base);
-        serialize_int32_be_incr(ptr, (*((*d).cells).offset(i as isize)).check);
-        i += 1;
-        i;
-    }
+pub(crate) unsafe extern "C" fn da_serialize(d: *const DArray, mut ptr: NonNull<NonNull<[u8]>>) {
+    // FIXME: [u8] type is not actually stable ABI
+    let mut cursor = Cursor::new(ptr.as_mut().as_mut());
+    (*d).serialize(&mut cursor).unwrap();
+    // Move ptr
+    ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 }
 
 #[no_mangle]
