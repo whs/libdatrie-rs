@@ -54,10 +54,6 @@ pub(crate) extern "C" fn file_write_int32(file: *mut libc::FILE, val: i32) -> Bo
     }
 }
 
-extern "C" fn parse_int16_be(buff: &[u8]) -> i16 {
-    BigEndian::read_i16(buff)
-}
-
 #[no_mangle]
 pub(crate) extern "C" fn file_read_int16(file: *mut libc::FILE, o_val: *mut i16) -> Bool {
     let mut stream = match wrap_cfile(file) {
