@@ -60,6 +60,30 @@ impl Tail {
 
         unsafe { slice::from_raw_parts_mut(self.tails, self.num_tails as usize) }
     }
+
+    pub(crate) fn get_suffix(&self, index: usize) -> Option<*mut TrieChar> {
+        let index = index - TAIL_START_BLOCKNO as usize;
+        self.blocks().get(index).map(|v| v.suffix)
+    }
+
+    pub(crate) fn get_data(
+        &self,
+        index: usize,
+    ) -> Option<TrieData> {
+        let index = index - TAIL_START_BLOCKNO as usize;
+        self.blocks().get(index).map(|v| v.data)
+    }
+
+    pub(crate) fn set_data(&mut self, index: usize, data: TrieData) -> Option<()> {
+        let index = index - TAIL_START_BLOCKNO as usize;
+        match self.blocks_mut().get_mut(index) {
+            Some(block) => {
+                block.data = data;
+                Some(())
+            },
+            None => None
+        }
+    }
 }
 
 impl Default for Tail {
@@ -93,6 +117,7 @@ pub(crate) struct TailBlock {
     pub suffix: *mut TrieChar,
 }
 
+#[deprecated(note="Use Tail::default()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_new() -> *mut Tail {
     Box::into_raw(Box::new(Tail::default()))
@@ -308,17 +333,17 @@ pub(crate) unsafe extern "C" fn tail_serialize(
     return 0 as libc::c_int;
 }
 
+#[deprecated(note="Use t.get_suffix()")]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_get_suffix(
+pub(crate) extern "C" fn tail_get_suffix(
     mut t: *const Tail,
     mut index: TrieIndex,
 ) -> *const TrieChar {
-    index -= TAIL_START_BLOCKNO;
-    return if index < (*t).num_tails {
-        (*((*t).tails).offset(index as isize)).suffix
-    } else {
-        NULL as *mut TrieChar
-    };
+    let tail = unsafe { &*t };
+    match tail.get_suffix(index as usize) {
+        Some(v) => v,
+        None => ptr::null(),
+    }
 }
 
 #[no_mangle]
@@ -414,91 +439,92 @@ unsafe fn tail_free_block(mut t: *mut Tail, mut block: TrieIndex) {
     };
 }
 
+#[deprecated="Use t.get_data().unwrap_or(TRIE_DATA_ERROR)"]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_get_data(
+pub(crate) extern "C" fn tail_get_data(
     mut t: *const Tail,
     mut index: TrieIndex,
 ) -> TrieData {
-    index -= TAIL_START_BLOCKNO;
-    return if index < (*t).num_tails {
-        (*((*t).tails).offset(index as isize)).data
-    } else {
-        TRIE_DATA_ERROR
-    };
-}
-
-#[no_mangle]
-pub(crate) unsafe extern "C" fn tail_set_data(
-    mut t: *mut Tail,
-    mut index: TrieIndex,
-    mut data: TrieData,
-) -> Bool {
-    index -= TAIL_START_BLOCKNO;
-    if index < (*t).num_tails {
-        (*((*t).tails).offset(index as isize)).data = data;
-        return TRUE as Bool;
+    let tail = unsafe { &*t };
+    match tail.get_data(index as usize) {
+        Some(v) => v,
+        None => TRIE_DATA_ERROR,
     }
-    return FALSE as Bool;
 }
 
+#[deprecated="Use t.set_data()"]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_delete(mut t: *mut Tail, mut index: TrieIndex) {
-    tail_free_block(t, index);
+pub(crate) extern "C" fn tail_set_data(
+    mut t: NonNull<Tail>,
+    index: TrieIndex,
+    data: TrieData,
+) -> Bool {
+    let tail = unsafe { t.as_mut() };
+    match tail.set_data(index as usize, data) {
+        Some(_) => TRUE,
+        None => FALSE,
+    }
 }
 
+// Delete suffix entry from the tail data.
+#[no_mangle]
+pub(crate) unsafe extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
+    tail_free_block(t.as_mut(), index);
+}
+
+// Walk in tail with a string
+//
+// Walk in the tail data `t` at entry `s`, from given character position
+// `*suffix_idx`, using `len` characters of given string `str`. On return,
+// `*suffix_idx` is updated to the position after the last successful walk,
+// and the function returns the total number of character successfully walked.
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_str(
-    mut t: *const Tail,
-    mut s: TrieIndex,
-    mut suffix_idx: *mut libc::c_short,
-    mut str: *const TrieChar,
-    mut len: libc::c_int,
+    t: *const Tail,
+    s: TrieIndex,
+    suffix_idx: *mut libc::c_short,
+    str: *const TrieChar,
+    len: libc::c_int,
 ) -> libc::c_int {
-    let mut suffix: *const TrieChar = 0 as *const TrieChar;
-    let mut i: libc::c_int = 0;
-    let mut j: libc::c_short = 0;
-    suffix = tail_get_suffix(t, s);
-    if suffix.is_null() {
-        return FALSE as libc::c_int;
-    }
-    i = 0 as libc::c_int;
-    j = *suffix_idx;
+    let tail = unsafe { &*t };
+    let Some(suffix) = tail.get_suffix(s as usize) else { return FALSE as libc::c_int };
+    let mut i = 0;
+    let mut j = *suffix_idx;
     while i < len {
         if *str.offset(i as isize) as libc::c_int != *suffix.offset(j as isize) as libc::c_int {
             break;
         }
         i += 1;
-        i;
         if TRIE_CHAR_TERM as libc::c_int == *suffix.offset(j as isize) as libc::c_int {
             break;
         }
         j += 1;
-        j;
     }
     *suffix_idx = j;
-    return i;
+    i
 }
 
+// Walk in tail with a character
+//
+// Walk in the tail data `t` at entry `s`, from given character position
+// `*suffix_idx`, using given character `c`. If the walk is successful,
+// it returns `TRUE`, and `*suffix_idx` is updated to the next character.
+// Otherwise, it returns `FALSE`, and `*suffix_idx` is left unchanged.
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_char(
-    mut t: *const Tail,
-    mut s: TrieIndex,
-    mut suffix_idx: *mut libc::c_short,
-    mut c: TrieChar,
+    t: *const Tail,
+    s: TrieIndex,
+    suffix_idx: *mut i16,
+    c: TrieChar,
 ) -> Bool {
-    let mut suffix: *const TrieChar = 0 as *const TrieChar;
-    let mut suffix_char: TrieChar = 0;
-    suffix = tail_get_suffix(t, s);
-    if suffix.is_null() {
-        return FALSE as Bool;
-    }
-    suffix_char = *suffix.offset(*suffix_idx as isize);
-    if suffix_char as libc::c_int == c as libc::c_int {
+    let tail = unsafe { &*t };
+    let Some(suffix) = tail.get_suffix(s as usize) else { return FALSE };
+    let suffix_char = *suffix.offset(*suffix_idx as isize);
+    if suffix_char == c {
         if TRIE_CHAR_TERM != suffix_char {
             *suffix_idx += 1;
-            *suffix_idx;
         }
-        return TRUE as Bool;
+        return TRUE;
     }
-    return FALSE as Bool;
+    FALSE
 }
