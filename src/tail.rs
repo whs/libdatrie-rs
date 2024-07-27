@@ -1,12 +1,12 @@
-use std::{io, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
+use std::{io, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie::{TRIE_DATA_ERROR, TrieChar, TrieData};
+use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR};
 use crate::trie_string::{trie_char_clone, TRIE_CHAR_TERM};
 use crate::types::*;
 
@@ -56,10 +56,7 @@ impl Tail {
         true
     }
 
-    pub(crate) fn add_suffix(
-        &mut self,
-        suffix: Option<Box<[TrieChar]>>,
-    ) -> TrieIndex {
+    pub(crate) fn add_suffix(&mut self, suffix: Option<Box<[TrieChar]>>) -> TrieIndex {
         let new_block = self.alloc_block();
         self.set_suffix(new_block, suffix);
         new_block
@@ -67,11 +64,13 @@ impl Tail {
 
     pub(crate) fn get_data(&self, index: usize) -> Option<TrieData> {
         let index = index - TAIL_START_BLOCKNO as usize;
-        self.tails.get(index).map(|v| v.data)
+        self.tails.get(index).map(|v| v.data).flatten()
     }
 
-    pub(crate) fn set_data(&mut self, index: usize, data: TrieData) -> Option<()> {
+    pub(crate) fn set_data(&mut self, index: usize, data: Option<TrieData>) -> Option<()> {
         let index = index - TAIL_START_BLOCKNO as usize;
+        // TRIE_DATA_ERROR in C is mapped to None
+        debug_assert_ne!(data, Some(TRIE_DATA_ERROR));
         match self.tails.get_mut(index) {
             Some(block) => {
                 block.data = data;
@@ -93,12 +92,7 @@ impl Tail {
     // Return position after the last successful walk and the
     // total number of character successfully walked.
     #[must_use]
-    pub(crate) fn walk_str(
-        &self,
-        s: TrieIndex,
-        suffix_idx: i16,
-        str: &[TrieChar],
-    ) -> (i16, i32) {
+    pub(crate) fn walk_str(&self, s: TrieIndex, suffix_idx: i16, str: &[TrieChar]) -> (i16, i32) {
         let Some(suffix) = self.get_suffix(s as usize) else {
             return (suffix_idx, 0);
         };
@@ -127,12 +121,7 @@ impl Tail {
     // `*suffix_idx`, using given character `c`. If the walk is successful,
     // it returns `Some(next_character_idx)`. Otherwise, it returns `None`
     #[must_use]
-    pub(crate) fn walk_char(
-        &self,
-        s: TrieIndex,
-        suffix_idx: i16,
-        c: TrieChar,
-    ) -> Option<i16> {
+    pub(crate) fn walk_char(&self, s: TrieIndex, suffix_idx: i16, c: TrieChar) -> Option<i16> {
         let suffix = self.get_suffix(s as usize)?;
         let suffix_char = suffix[suffix_idx as usize];
         if suffix_char == c {
@@ -206,7 +195,10 @@ impl Tail {
 
         for block in &mut blocks {
             block.next_free = reader.read_i32::<BigEndian>()?;
-            block.data = reader.read_i32::<BigEndian>()?;
+            block.data = match reader.read_i32::<BigEndian>()? {
+                TRIE_DATA_ERROR => None,
+                value => Some(value),
+            };
             block.suffix = None;
 
             let length = reader.read_i16::<BigEndian>()?;
@@ -231,7 +223,10 @@ impl Tail {
 
         for block in &self.tails {
             writer.write_i32::<BigEndian>(block.next_free)?;
-            writer.write_i32::<BigEndian>(block.data)?;
+            match block.data {
+                Some(v) => writer.write_i32::<BigEndian>(v)?,
+                None => writer.write_i32::<BigEndian>(TRIE_DATA_ERROR)?,
+            }
 
             match &block.suffix {
                 None => {
@@ -271,14 +266,14 @@ impl Tail {
 #[repr(C)]
 pub(crate) struct TailBlock {
     next_free: TrieIndex,
-    data: TrieData,
+    data: Option<TrieData>,
     suffix: Option<Box<[TrieChar]>>,
 }
 
 impl TailBlock {
     fn reset(&mut self) {
         self.next_free = -1;
-        self.data = TRIE_DATA_ERROR;
+        self.data = None;
         self.suffix = None;
     }
 }
@@ -287,7 +282,7 @@ impl Default for TailBlock {
     fn default() -> Self {
         TailBlock {
             next_free: -1,
-            data: TRIE_DATA_ERROR,
+            data: None,
             suffix: None,
         }
     }
@@ -394,7 +389,7 @@ pub(crate) unsafe extern "C" fn tail_add_suffix(
     tail.add_suffix(suffix)
 }
 
-#[deprecated(note="Use t.get_data().unwrap_or(TRIE_DATA_ERROR)")]
+#[deprecated(note = "Use t.get_data().unwrap_or(TRIE_DATA_ERROR)")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_get_data(mut t: *const Tail, mut index: TrieIndex) -> TrieData {
     let tail = unsafe { &*t };
@@ -404,7 +399,7 @@ pub(crate) extern "C" fn tail_get_data(mut t: *const Tail, mut index: TrieIndex)
     }
 }
 
-#[deprecated(note="Use t.set_data()")]
+#[deprecated(note = "Use t.set_data()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_set_data(
     mut t: NonNull<Tail>,
@@ -412,6 +407,10 @@ pub(crate) extern "C" fn tail_set_data(
     data: TrieData,
 ) -> Bool {
     let tail = unsafe { t.as_mut() };
+    let data = match data {
+        TRIE_DATA_ERROR => None,
+        v => Some(v),
+    };
     match tail.set_data(index as usize, data) {
         Some(_) => TRUE,
         None => FALSE,
@@ -419,7 +418,7 @@ pub(crate) extern "C" fn tail_set_data(
 }
 
 // Delete suffix entry from the tail data.
-#[deprecated(note="Use t.delete()")]
+#[deprecated(note = "Use t.delete()")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
     let tail = unsafe { t.as_mut() };
@@ -432,7 +431,7 @@ pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
 // `*suffix_idx`, using `len` characters of given string `str`. On return,
 // `*suffix_idx` is updated to the position after the last successful walk,
 // and the function returns the total number of character successfully walked.
-#[deprecated(note="Use (*suffix_idx, walked) = t.walk_str()")]
+#[deprecated(note = "Use (*suffix_idx, walked) = t.walk_str()")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_str(
     t: *const Tail,
@@ -454,7 +453,7 @@ pub(crate) unsafe extern "C" fn tail_walk_str(
 // `*suffix_idx`, using given character `c`. If the walk is successful,
 // it returns `TRUE`, and `*suffix_idx` is updated to the next character.
 // Otherwise, it returns `FALSE`, and `*suffix_idx` is left unchanged.
-#[deprecated(note="Use Some(*suffix_idx) = t.walk_char()")]
+#[deprecated(note = "Use Some(*suffix_idx) = t.walk_char()")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_walk_char(
     t: *const Tail,
@@ -469,6 +468,6 @@ pub(crate) unsafe extern "C" fn tail_walk_char(
             *suffix_idx = idx;
             TRUE
         }
-        None => FALSE
+        None => FALSE,
     }
 }
