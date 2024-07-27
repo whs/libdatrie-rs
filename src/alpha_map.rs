@@ -1,14 +1,14 @@
+use std::{io, iter, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
-use std::{io, iter, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
+use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
 use crate::types::*;
 
 extern "C" {
@@ -41,7 +41,7 @@ impl AlphaMap {
         Some(())
     }
 
-    pub(crate) fn read<T: Read>(stream: &mut T) -> io::Result<AlphaMap> {
+    pub(crate) fn read<T: Read>(stream: &mut T) -> io::Result<Self> {
         // check signature
         match stream.read_u32::<BigEndian>() {
             Ok(ALPHAMAP_SIGNATURE) => {}
@@ -54,7 +54,7 @@ impl AlphaMap {
             Err(v) => return Err(v),
         }
 
-        let mut alphamap = AlphaMap::default();
+        let mut alphamap = Self::default();
 
         // Read number of ranges
         let total = stream.read_i32::<BigEndian>()?;
@@ -111,9 +111,11 @@ impl AlphaMap {
                 if trie_char == TRIE_CHAR_TERM as TrieIndex {
                     trie_char += 1;
                 }
-                // This does bond check every loop iteration...
-                alpha_to_trie_map[(a - alpha_begin) as usize] = trie_char as TrieIndex;
-                trie_to_alpha_map[trie_char as usize] = a;
+                // Elide bond checks
+                unsafe {
+                    *alpha_to_trie_map.get_unchecked_mut((a - alpha_begin) as usize) = trie_char as TrieIndex;
+                    *trie_to_alpha_map.get_unchecked_mut(trie_char as usize) = a;
+                }
                 trie_char += 1;
             }
         }
@@ -123,7 +125,7 @@ impl AlphaMap {
         self.trie_to_alpha_map = trie_to_alpha_map;
     }
 
-    fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
+    pub(crate) fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
         buf.write_u32::<BigEndian>(ALPHAMAP_SIGNATURE)?;
         buf.write_i32::<BigEndian>(self.ranges.len() as i32)?;
 
