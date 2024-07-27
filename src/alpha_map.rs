@@ -1,20 +1,15 @@
-use std::{io, iter, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
+use std::{io, iter, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie_string::{trie_char_strlen, TRIE_CHAR_TERM, TrieChar};
+use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
 use crate::types::*;
-
-extern "C" {
-    fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
-    fn free(_: *mut libc::c_void);
-}
 
 #[derive(Clone, Default)]
 #[repr(C)]
@@ -75,6 +70,24 @@ impl AlphaMap {
         Ok(alphamap)
     }
 
+    pub(crate) fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
+        buf.write_u32::<BigEndian>(ALPHAMAP_SIGNATURE)?;
+        buf.write_i32::<BigEndian>(self.ranges.len() as i32)?;
+
+        for range in self.ranges.iter() {
+            buf.write_i32::<BigEndian>(*range.start() as i32)?;
+            buf.write_i32::<BigEndian>(*range.end() as i32)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn serialized_size(&self) -> usize {
+        return 4 // ALPHAMAP_SIGNATURE
+            + size_of::<i32>() // ranges_count
+            + (size_of::<AlphaChar>() * 2 * self.ranges.len());
+    }
+
     fn recalc_work_area(&mut self) {
         // free old existing map
         self.alpha_to_trie_map = Box::new([]);
@@ -113,7 +126,8 @@ impl AlphaMap {
                 }
                 // Elide bond checks
                 unsafe {
-                    *alpha_to_trie_map.get_unchecked_mut((a - alpha_begin) as usize) = trie_char as TrieIndex;
+                    *alpha_to_trie_map.get_unchecked_mut((a - alpha_begin) as usize) =
+                        trie_char as TrieIndex;
                     *trie_to_alpha_map.get_unchecked_mut(trie_char as usize) = a;
                 }
                 trie_char += 1;
@@ -123,24 +137,6 @@ impl AlphaMap {
 
         self.alpha_to_trie_map = alpha_to_trie_map;
         self.trie_to_alpha_map = trie_to_alpha_map;
-    }
-
-    pub(crate) fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
-        buf.write_u32::<BigEndian>(ALPHAMAP_SIGNATURE)?;
-        buf.write_i32::<BigEndian>(self.ranges.len() as i32)?;
-
-        for range in self.ranges.iter() {
-            buf.write_i32::<BigEndian>(*range.start() as i32)?;
-            buf.write_i32::<BigEndian>(*range.end() as i32)?;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn serialized_size(&self) -> usize {
-        return 4 // ALPHAMAP_SIGNATURE
-            + size_of::<i32>() // ranges_count
-            + (size_of::<AlphaChar>() * 2 * self.ranges.len());
     }
 
     pub(crate) fn char_to_trie(&self, ac: AlphaChar) -> TrieIndex {

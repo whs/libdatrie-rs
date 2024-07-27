@@ -1,6 +1,6 @@
-use std::mem::MaybeUninit;
 use crate::types::*;
 use libc;
+use std::mem::MaybeUninit;
 use std::slice;
 
 #[derive(Clone)]
@@ -77,8 +77,10 @@ pub extern "C" fn dstring_append(dst: *mut DString, src: *const DString) -> Bool
         return FALSE;
     }
 
-    dst.val
-        .resize((dst.str_len + src.str_len + 1) * dst.char_size, MaybeUninit::uninit());
+    dst.val.resize(
+        (dst.str_len + src.str_len + 1) * dst.char_size,
+        MaybeUninit::uninit(),
+    );
 
     for (dchr, schr) in dst
         .val
@@ -102,8 +104,10 @@ pub extern "C" fn dstring_append_string(
     let ds = unsafe { &mut *ds };
     let data = unsafe { slice::from_raw_parts(data.cast(), ds.char_size * len as usize) };
 
-    ds.val
-        .resize((ds.str_len + len as usize + 1) * ds.char_size, MaybeUninit::uninit());
+    ds.val.resize(
+        (ds.str_len + len as usize + 1) * ds.char_size,
+        MaybeUninit::uninit(),
+    );
 
     for (dchr, schr) in ds
         .val
@@ -123,7 +127,8 @@ pub extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc::c_voi
     let ds = unsafe { &mut *ds };
     let data = unsafe { slice::from_raw_parts(data.cast(), ds.char_size) };
 
-    ds.val.resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
+    ds.val
+        .resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
 
     for (dst, src) in ds
         .val
@@ -141,7 +146,8 @@ pub extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc::c_voi
 #[no_mangle]
 pub extern "C" fn dstring_terminate(ds: *mut DString) -> Bool {
     let ds = unsafe { &mut *ds };
-    ds.val.resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
+    ds.val
+        .resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
 
     for dchar in ds
         .val

@@ -1,12 +1,12 @@
-use std::{io, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
+use std::{io, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie::{TRIE_DATA_ERROR, TRIE_INDEX_ERROR, TrieChar, TrieData};
+use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR, TRIE_INDEX_ERROR};
 use crate::trie_string::{trie_char_strdup, trie_char_strlen, trie_char_strsize, TRIE_CHAR_TERM};
 use crate::types::*;
 
@@ -73,18 +73,26 @@ impl Tail {
 
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         if reader.read_u32::<BigEndian>()? != TAIL_SIGNATURE {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid signature"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid signature",
+            ));
         }
         let mut tail = Self::default();
         tail.first_free = reader.read_i32::<BigEndian>()?;
-        tail.num_tails =  reader.read_i32::<BigEndian>()?;
+        tail.num_tails = reader.read_i32::<BigEndian>()?;
 
         if tail.num_tails > (usize::MAX / size_of::<TailBlock>()) as i32 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "block count too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "block count too large",
+            ));
         }
 
         // TODO: This leaks if this function fails. It should be fixed when the tail.tails type is safe
-        tail.tails = unsafe { malloc((tail.num_tails as usize * size_of::<TailBlock>()) as libc::c_ulong).cast() };
+        tail.tails = unsafe {
+            malloc((tail.num_tails as usize * size_of::<TailBlock>()) as libc::c_ulong).cast()
+        };
         let blocks = tail.blocks_mut();
 
         for block in blocks {
@@ -125,6 +133,23 @@ impl Tail {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn serialized_size(&self) -> usize {
+        // This could potentially just be size_of::<TailBlock> but
+        // to ensure compatibility with original code
+        // we explicitly type out each fields' expected types
+        const size_of_block: usize = size_of::<TrieIndex>() // next_free
+            + size_of::<TrieData>() // data
+            + size_of::<i16>(); // length
+
+        size_of::<i32>() // TAIL_SIGNATURE
+            + size_of::<TrieIndex>() // first_free
+            + size_of::<TrieIndex>() // num_tails
+            + (size_of_block * self.num_tails as usize)
+            + self.blocks().iter().map(|block| {
+            trie_char_strsize(block.suffix)
+        }).sum::<usize>()
     }
 }
 
@@ -198,31 +223,11 @@ pub(crate) extern "C" fn tail_fwrite(t: *const Tail, file: NonNull<libc::FILE>) 
     }
 }
 
+#[deprecated(note = "Use t.serialized_size()")]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_get_serialized_size(mut t: *const Tail) -> size_t {
-    let mut static_count: size_t = (::core::mem::size_of::<int32>() as libc::c_ulong)
-        .wrapping_add(::core::mem::size_of::<TrieIndex>() as libc::c_ulong)
-        .wrapping_add(::core::mem::size_of::<TrieIndex>() as libc::c_ulong);
-    let mut dynamic_count: size_t = 0 as libc::c_uint as size_t;
-    if (*t).num_tails > 0 as libc::c_int {
-        let mut i: TrieIndex = 0 as libc::c_int;
-        dynamic_count = (dynamic_count as libc::c_ulong).wrapping_add(
-            (::core::mem::size_of::<TrieIndex>() as libc::c_ulong)
-                .wrapping_add(::core::mem::size_of::<TrieData>() as libc::c_ulong)
-                .wrapping_add(::core::mem::size_of::<int16>() as libc::c_ulong)
-                .wrapping_mul((*t).num_tails as libc::c_ulong),
-        ) as size_t as size_t;
-        while i < (*t).num_tails {
-            if !((*((*t).tails).offset(i as isize)).suffix).is_null() {
-                dynamic_count = dynamic_count.wrapping_add(trie_char_strsize(
-                    (*((*t).tails).offset(i as isize)).suffix,
-                ) as u64);
-            }
-            i += 1;
-            i;
-        }
-    }
-    return static_count.wrapping_add(dynamic_count);
+pub(crate) extern "C" fn tail_get_serialized_size(t: *const Tail) -> usize {
+    let tail = unsafe { &*t };
+    tail.serialized_size()
 }
 
 #[deprecated(note = "Use t.serialize()")]
