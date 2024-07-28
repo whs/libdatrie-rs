@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::ptr::NonNull;
 use std::slice;
 
+#[deprecated(note = "Use wrap_cfile_nonnull")]
 pub(crate) fn wrap_cfile(file: *mut libc::FILE) -> Option<cstream::Io<BorrowedCStream<'static>>> {
     NonNull::new(file).map(|file| unsafe { cstream::Io(BorrowedCStream::borrow_raw(file)) })
 }
@@ -18,9 +19,8 @@ pub(crate) fn wrap_cfile_nonnull(
 
 #[no_mangle]
 pub(crate) extern "C" fn file_read_int32(file: *mut libc::FILE, o_val: *mut i32) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
     match stream.read_i32::<BigEndian>() {
         Ok(v) => unsafe {
@@ -44,21 +44,16 @@ pub(crate) unsafe extern "C" fn serialize_int32_be_incr(buff: *mut *mut u8, val:
 
 #[no_mangle]
 pub(crate) extern "C" fn file_write_int32(file: *mut libc::FILE, val: i32) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
-    match stream.write_i32::<BigEndian>(val) {
-        Ok(_) => TRUE,
-        Err(_) => FALSE,
-    }
+    stream.write_i32::<BigEndian>(val).is_ok().into()
 }
 
 #[no_mangle]
 pub(crate) extern "C" fn file_read_int16(file: *mut libc::FILE, o_val: *mut i16) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
     match stream.read_i16::<BigEndian>() {
         Ok(v) => unsafe {
@@ -82,21 +77,16 @@ pub(crate) unsafe extern "C" fn serialize_int16_be_incr(buff: *mut *mut u8, val:
 
 #[no_mangle]
 pub(crate) extern "C" fn file_write_int16(file: *mut libc::FILE, val: i16) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
-    match stream.write_i16::<BigEndian>(val) {
-        Ok(_) => TRUE,
-        Err(_) => FALSE,
-    }
+    stream.write_i16::<BigEndian>(val).is_ok().into()
 }
 
 #[no_mangle]
 pub(crate) extern "C" fn file_read_int8(file: *mut libc::FILE, o_val: *mut i8) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
     match stream.read_i8() {
         Ok(v) => unsafe {
@@ -109,28 +99,20 @@ pub(crate) extern "C" fn file_read_int8(file: *mut libc::FILE, o_val: *mut i8) -
 
 #[no_mangle]
 pub(crate) extern "C" fn file_write_int8(file: *mut libc::FILE, val: i8) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
-    match stream.write_i8(val) {
-        Ok(_) => TRUE,
-        Err(_) => FALSE,
-    }
+    stream.write_i8(val).is_ok().into()
 }
 
 #[no_mangle]
 pub(crate) extern "C" fn file_read_chars(file: *mut libc::FILE, buff: *mut u8, len: i32) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
     let buff = unsafe { slice::from_raw_parts_mut(buff, len as usize) };
 
-    match stream.read_exact(buff) {
-        Ok(_) => TRUE,
-        Err(_) => FALSE,
-    }
+    stream.read_exact(buff).is_ok().into()
 }
 
 #[no_mangle]
@@ -139,9 +121,8 @@ pub(crate) extern "C" fn file_write_chars(
     buff: *const u8,
     len: i32,
 ) -> Bool {
-    let mut stream = match wrap_cfile(file) {
-        Some(v) => v,
-        None => return FALSE,
+    let Some(mut stream) = wrap_cfile(file) else {
+        return FALSE;
     };
     let buff = unsafe { slice::from_raw_parts(buff, len as usize) };
 

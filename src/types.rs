@@ -1,12 +1,56 @@
 use null_terminated::Nul;
 use std::cmp::Ordering;
+use std::ops::{Deref, Not};
 
-pub type Bool = u32;
+#[derive(Eq, PartialEq)]
+#[repr(transparent)]
+pub(crate) struct Bool(u32);
 
-pub const DA_TRUE: Bool = 1;
-pub const DA_FALSE: Bool = 0;
-pub const FALSE: Bool = DA_FALSE;
-pub const TRUE: Bool = DA_TRUE;
+pub(crate) const DA_TRUE: Bool = Bool(1);
+pub(crate) const DA_FALSE: Bool = Bool(0);
+pub(crate) const FALSE: Bool = DA_FALSE;
+pub(crate) const TRUE: Bool = DA_TRUE;
+
+impl From<bool> for Bool {
+    fn from(value: bool) -> Self {
+        match value {
+            true => TRUE,
+            false => FALSE,
+        }
+    }
+}
+
+impl Into<bool> for Bool {
+    fn into(self) -> bool {
+        match self.0 {
+            1 => true,
+            0 => false,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Into<u32> for Bool {
+    fn into(self) -> u32 {
+        self.0
+    }
+}
+
+impl Deref for Bool {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Not for Bool {
+    type Output = bool;
+
+    fn not(self) -> Self::Output {
+        self.0 == 0
+    }
+}
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;

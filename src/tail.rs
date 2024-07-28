@@ -367,10 +367,7 @@ pub(crate) extern "C" fn tail_set_suffix(
 ) -> Bool {
     let tail = unsafe { t.as_mut() };
     let suffix = unsafe { suffix.as_ref() }.map(|v| trie_char_clone(v));
-    match tail.set_suffix(index, suffix) {
-        true => TRUE,
-        false => FALSE,
-    }
+    tail.set_suffix(index, suffix).into()
 }
 
 #[deprecated(note = "Clone the input into Rust and use tail.add_suffix().")]
@@ -407,10 +404,7 @@ pub(crate) extern "C" fn tail_set_data(
         TRIE_DATA_ERROR => None,
         v => Some(v),
     };
-    match tail.set_data(index as usize, data) {
-        Some(_) => TRUE,
-        None => FALSE,
-    }
+    tail.set_data(index as usize, data).is_some().into()
 }
 
 /// Delete suffix entry from the tail data.
