@@ -180,27 +180,40 @@ impl DArray {
     }
 
     fn extend_pool(&mut self, to_index: TrieIndex) -> bool {
-        if to_index <= 0 || to_index >= TRIE_INDEX_MAX {
+        // Rust: minimum index is now DA_POOL_BEGIN+1 instead of 0
+        if to_index <= DA_POOL_BEGIN || to_index >= TRIE_INDEX_MAX {
             return false;
         }
-        if to_index < self.cells.len() as TrieIndex {
+        if (to_index as usize) < self.cells.len() {
             return true;
         }
+        // Hence get_free_list(1) < DA_POOL_BEGIN (3) < self.cells.len() <= to_index < TRIE_INDEX_MAX
+        // The compiler still doesn't use this information though...
 
         let new_begin = self.cells.len() as TrieIndex;
         let free_tail = -self.get_base(self.get_free_list()).unwrap();
 
         self.cells.reserve(to_index as usize + 1 - self.cells.len());
+        // XXX: The compiler currently don't unroll this loop
+        // It could be faster if we generate the first and last item separately
+        // but the code will be complicated
         for i in new_begin..=to_index {
             let check = if i == to_index {
+                // Last index
                 -self.get_free_list()
             } else {
                 -(i + 1)
             };
-            let base = if i == new_begin { -free_tail } else { -(i - 1) };
+            let base = if i == new_begin {
+                // First new index
+                -free_tail
+            } else {
+                -(i - 1)
+            };
             self.cells.push(DACell { check, base })
         }
-        assert_eq!(self.cells.len(), to_index as usize + 1);
+        // The compiler doesn't seems to use this information to elide bond checks below
+        debug_assert_eq!(self.cells.len(), to_index as usize + 1);
 
         // merge the new circular list to the old
         self.set_check(free_tail, -new_begin);
