@@ -7,7 +7,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
-use crate::trie_string::{trie_string_append_char, trie_string_cut_last, TrieChar, TrieString};
+use crate::trie_string::{TRIE_CHAR_MAX, trie_string_append_char, trie_string_cut_last, TrieChar, TrieString};
 use crate::types::*;
 
 extern "C" {
@@ -31,14 +31,14 @@ pub(crate) struct DArray {
     cells: *mut DACell,
 }
 
-pub(crate) const DA_SIGNATURE: u32 = 0xdafcdafc;
+const DA_SIGNATURE: u32 = 0xdafcdafc;
 
 // DA Header:
 // - Cell 0: SIGNATURE, number of cells
 // - Cell 1: free circular-list pointers
 // - Cell 2: root node
 // - Cell 3: DA pool begin
-pub(crate) const DA_POOL_BEGIN: TrieIndex = 3;
+const DA_POOL_BEGIN: TrieIndex = 3;
 
 impl DArray {
     fn slice(&self) -> &[DACell] {
@@ -106,6 +106,32 @@ impl DArray {
         unsafe {
             da_extend_pool(self, s).into() && self.get_check(s).unwrap_or(TRIE_INDEX_ERROR) < 0
         }
+    }
+
+    fn has_children(&self, s: TrieIndex) -> bool {
+        let Some(base) = self.get_base(s) else { return false };
+        if base < 0 {
+            return false;
+        }
+        let max_c = cmp::min(TRIE_CHAR_MAX as TrieIndex, self.num_cells - base);
+        for c in 0..=max_c {
+            if self.get_check(base+c) == Some(s) {
+                return true;
+            }
+        }
+        return false
+    }
+
+    pub(crate) fn output_symbols(&self, s: TrieIndex) -> Symbols {
+        let mut syms = Symbols::default();
+        let base = self.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
+        let max_c = cmp::min(TrieChar::MAX as TrieIndex, self.num_cells - base);
+        for c in 0..=max_c {
+            if self.get_check(base + c) == Some(s) {
+                syms.add_fast(c as TrieChar);
+            }
+        }
+        syms
     }
 
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
@@ -329,48 +355,21 @@ pub unsafe extern "C" fn da_insert_branch(
     return next;
 }
 
-#[deprecated(note = "Use d.check_free_cell")]
+#[deprecated(note = "Use d.check_free_cell()")]
 fn da_check_free_cell(mut d: NonNull<DArray>, s: TrieIndex) -> Bool {
     unsafe { d.as_mut() }.check_free_cell(s).into()
 }
 
-unsafe fn da_has_children(mut d: *const DArray, mut s: TrieIndex) -> Bool {
-    let mut base: TrieIndex = 0;
-    let mut c: TrieIndex = 0;
-    let mut max_c: TrieIndex = 0;
-    base = da_get_base(d, s);
-    if TRIE_INDEX_ERROR == base || base < 0 as libc::c_int {
-        return FALSE as Bool;
-    }
-    max_c = if (255 as libc::c_int) < (*d).num_cells - base {
-        255 as libc::c_int
-    } else {
-        (*d).num_cells - base
-    };
-    c = 0 as libc::c_int;
-    while c <= max_c {
-        if da_get_check(d, base + c) == s {
-            return TRUE as Bool;
-        }
-        c += 1;
-        c;
-    }
-    return FALSE as Bool;
+#[deprecated(note = "Use d.has_children()")]
+unsafe fn da_has_children(d: *const DArray, s: TrieIndex) -> Bool {
+    let da = unsafe {&*d};
+    da.has_children(s).into()
 }
 
-pub(crate) unsafe fn da_output_symbols(mut d: *const DArray, mut s: TrieIndex) -> Symbols {
-    let mut syms = Symbols::default();
-    let base = da_get_base(d, s);
-    let max_c = cmp::min(TrieChar::MAX as TrieIndex, (*d).num_cells - base);
-    let mut c = 0;
-    // TODO: Change while to for
-    while c <= max_c {
-        if da_get_check(d, base + c) == s {
-            syms.add_fast(c as TrieChar);
-        }
-        c += 1;
-    }
-    syms
+#[deprecated(note = "Use d.output_symbols()")]
+pub(crate) unsafe fn da_output_symbols(d: *const DArray, s: TrieIndex) -> Symbols {
+    let da = unsafe {&*d};
+    da.output_symbols(s)
 }
 
 unsafe fn da_find_free_base(mut d: NonNull<DArray>, symbols: &Symbols) -> TrieIndex {

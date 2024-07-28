@@ -20,7 +20,7 @@ pub struct AlphaMap {
     trie_to_alpha_map: Box<[AlphaChar]>,
 }
 
-pub const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
+const ALPHAMAP_SIGNATURE: u32 = 0xd9fcd9fc;
 
 impl AlphaMap {
     pub fn add_range(&mut self, range: RangeInclusive<AlphaChar>) {

@@ -16,8 +16,8 @@ pub(crate) struct Tail {
     first_free: TrieIndex,
 }
 
-pub(crate) const TAIL_SIGNATURE: u32 = 0xdffcdffc;
-pub(crate) const TAIL_START_BLOCKNO: TrieIndex = 1;
+const TAIL_SIGNATURE: u32 = 0xdffcdffc;
+const TAIL_START_BLOCKNO: TrieIndex = 1;
 
 impl Tail {
     #[deprecated(note = "Use self.tails")]

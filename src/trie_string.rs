@@ -9,6 +9,7 @@ use crate::types::*;
 
 pub type TrieChar = u8;
 pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
+pub const TRIE_CHAR_MAX: TrieChar = TrieChar::MAX;
 
 #[derive(Clone)]
 pub struct TrieString {
