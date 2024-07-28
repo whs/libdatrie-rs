@@ -166,6 +166,13 @@ impl DArray {
         }
     }
 
+    fn alloc_cell(&mut self, cell: TrieIndex) {
+        let prev = -self.get_base(cell).unwrap();
+        let next = -self.get_check(cell).unwrap();
+        self.set_check(prev, -next);
+        self.set_base(next, -prev);
+    }
+
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         if reader.read_i32::<BigEndian>()? != DA_SIGNATURE as i32 {
             return Err(io::Error::new(
@@ -382,7 +389,7 @@ pub unsafe extern "C" fn da_insert_branch(
         da.set_base(s, new_base_0);
         next = new_base_0 + c as libc::c_int;
     }
-    da_alloc_cell(da, next);
+    da.alloc_cell(next);
     da.set_check(next, s);
     return next;
 }
@@ -455,7 +462,7 @@ unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: T
         old_next = old_base + symbols.get(i as usize).unwrap() as libc::c_int;
         new_next = new_base + symbols.get(i as usize).unwrap() as libc::c_int;
         old_next_base = da_get_base(d, old_next);
-        da_alloc_cell(d, new_next);
+        da_alloc_cell(NonNull::new_unchecked(d), new_next);
         da_set_check(NonNull::new_unchecked(d), new_next, s);
         da_set_base(NonNull::new_unchecked(d), new_next, old_next_base);
         if old_next_base > 0 as libc::c_int {
@@ -534,13 +541,10 @@ pub(crate) unsafe extern "C" fn da_prune_upto(mut d: NonNull<DArray>, p: TrieInd
     da.prune_upto(p, s)
 }
 
-unsafe fn da_alloc_cell(mut d: *mut DArray, mut cell: TrieIndex) {
-    let mut prev: TrieIndex = 0;
-    let mut next: TrieIndex = 0;
-    prev = -da_get_base(d, cell);
-    next = -da_get_check(d, cell);
-    da_set_check(NonNull::new_unchecked(d), prev, -next);
-    da_set_base(NonNull::new_unchecked(d), next, -prev);
+#[deprecated(note="Use d.alloc_cell()")]
+fn da_alloc_cell(mut d: NonNull<DArray>, cell: TrieIndex) {
+    let da = unsafe {d.as_mut()};
+    da.alloc_cell(cell);
 }
 
 unsafe fn da_free_cell(mut d: *mut DArray, mut cell: TrieIndex) {
