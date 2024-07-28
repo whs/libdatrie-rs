@@ -188,20 +188,22 @@ impl DArray {
         }
 
         let new_begin = self.cells.len() as TrieIndex;
-        self.cells
-            .resize((to_index + 1) as usize, DACell::default());
+        let free_tail = -self.get_base(self.get_free_list()).unwrap();
 
-        // initialize the new free list
-        for i in new_begin..to_index {
-            self.set_check(i, -(i + 1));
-            self.set_base(i + 1, -i);
+        self.cells.reserve(to_index as usize + 1 - self.cells.len());
+        for i in new_begin..=to_index {
+            let check = if i == to_index {
+                -self.get_free_list()
+            } else {
+                -(i + 1)
+            };
+            let base = if i == new_begin { -free_tail } else { -(i - 1) };
+            self.cells.push(DACell { check, base })
         }
+        assert_eq!(self.cells.len(), to_index as usize + 1);
 
         // merge the new circular list to the old
-        let free_tail = -self.get_base(self.get_free_list()).unwrap();
         self.set_check(free_tail, -new_begin);
-        self.set_base(new_begin, -free_tail);
-        self.set_check(to_index, -self.get_free_list());
         self.set_base(self.get_free_list(), -to_index);
 
         // update header cell
