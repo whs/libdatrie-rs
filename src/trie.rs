@@ -1,22 +1,18 @@
-use crate::darray::da_output_symbols;
+use crate::alpha_map::{alpha_map_fread_bin, AlphaMap};
+use crate::darray::{da_fread, da_output_symbols, DArray};
+use crate::tail::{tail_fread, Tail};
+use crate::trie_string::TrieString;
 use crate::types::*;
 use ::libc;
+use std::ptr::NonNull;
 
 extern "C" {
-    pub type _IO_wide_data;
-    pub type _IO_codecvt;
-    pub type _IO_marker;
-    pub type _AlphaMap;
-    pub type _Tail;
-    pub type _DArray;
-    pub type _TrieString;
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
     fn fclose(__stream: *mut FILE) -> libc::c_int;
     fn fopen(_: *const libc::c_char, _: *const libc::c_char) -> *mut FILE;
     fn alpha_map_clone(a_map: *const AlphaMap) -> *mut AlphaMap;
     fn alpha_map_free(alpha_map: *mut AlphaMap);
-    fn alpha_map_fread_bin(file: *mut FILE) -> *mut AlphaMap;
     fn alpha_map_fwrite_bin(alpha_map: *const AlphaMap, file: *mut FILE) -> libc::c_int;
     fn alpha_map_get_serialized_size(alpha_map: *const AlphaMap) -> size_t;
     fn alpha_map_serialize_bin(alpha_map: *const AlphaMap, ptr: *mut *mut uint8);
@@ -43,7 +39,6 @@ extern "C" {
     fn da_free(d: *mut DArray);
     fn da_new() -> *mut DArray;
     fn da_get_check(d: *const DArray, s: TrieIndex) -> TrieIndex;
-    fn da_fread(file: *mut FILE) -> *mut DArray;
     fn da_get_root(d: *const DArray) -> TrieIndex;
     fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool;
     fn da_get_serialized_size(d: *const DArray) -> size_t;
@@ -53,7 +48,6 @@ extern "C" {
     fn da_prune(d: *mut DArray, s: TrieIndex);
     fn da_set_base(d: *mut DArray, s: TrieIndex, val: TrieIndex);
     fn tail_new() -> *mut Tail;
-    fn tail_fread(file: *mut FILE) -> *mut Tail;
     fn tail_free(t: *mut Tail);
     fn tail_get_serialized_size(t: *const Tail) -> size_t;
     fn tail_serialize(t: *const Tail, ptr: *mut *mut uint8) -> libc::c_int;
@@ -86,42 +80,7 @@ pub type int32 = libc::c_int;
 pub type AlphaChar = uint32;
 pub type TrieChar = libc::c_uchar;
 pub type TrieData = int32;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: libc::c_int,
-    pub _IO_read_ptr: *mut libc::c_char,
-    pub _IO_read_end: *mut libc::c_char,
-    pub _IO_read_base: *mut libc::c_char,
-    pub _IO_write_base: *mut libc::c_char,
-    pub _IO_write_ptr: *mut libc::c_char,
-    pub _IO_write_end: *mut libc::c_char,
-    pub _IO_buf_base: *mut libc::c_char,
-    pub _IO_buf_end: *mut libc::c_char,
-    pub _IO_save_base: *mut libc::c_char,
-    pub _IO_backup_base: *mut libc::c_char,
-    pub _IO_save_end: *mut libc::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: libc::c_int,
-    pub _flags2: libc::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: libc::c_ushort,
-    pub _vtable_offset: libc::c_schar,
-    pub _shortbuf: [libc::c_char; 1],
-    pub _lock: *mut libc::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut libc::c_void,
-    pub __pad5: size_t,
-    pub _mode: libc::c_int,
-    pub _unused2: [libc::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-pub type AlphaMap = _AlphaMap;
+pub type FILE = libc::FILE;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct _Trie {
@@ -130,8 +89,6 @@ pub struct _Trie {
     pub tail: *mut Tail,
     pub is_dirty: Bool,
 }
-pub type Tail = _Tail;
-pub type DArray = _DArray;
 pub type Trie = _Trie;
 pub type TrieEnumFunc =
     Option<unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool>;
@@ -151,7 +108,6 @@ pub struct _TrieIterator {
     pub state: *mut TrieState,
     pub key: *mut TrieString,
 }
-pub type TrieString = _TrieString;
 pub type TrieIterator = _TrieIterator;
 pub const TRIE_DATA_ERROR: libc::c_int = -(1 as libc::c_int);
 pub const TRIE_INDEX_ERROR: libc::c_int = 0 as libc::c_int;
@@ -191,14 +147,13 @@ pub unsafe extern "C" fn trie_new_from_file(mut path: *const libc::c_char) -> *m
     if trie_file.is_null() {
         return NULL as *mut Trie;
     }
-    trie = trie_fread(trie_file);
+    trie = trie_fread(NonNull::new_unchecked(trie_file));
     fclose(trie_file);
     return trie;
 }
 #[no_mangle]
-pub unsafe extern "C" fn trie_fread(mut file: *mut FILE) -> *mut Trie {
-    let mut trie: *mut Trie = 0 as *mut Trie;
-    trie = malloc(::core::mem::size_of::<Trie>() as libc::c_ulong) as *mut Trie;
+pub unsafe extern "C" fn trie_fread(mut file: NonNull<libc::FILE>) -> *mut Trie {
+    let trie = malloc(size_of::<Trie>() as libc::c_ulong) as *mut Trie;
     if trie.is_null() {
         return NULL as *mut Trie;
     }

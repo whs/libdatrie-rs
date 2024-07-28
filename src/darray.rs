@@ -1,6 +1,6 @@
-use std::{cmp, io, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
+use std::{cmp, io, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -107,7 +107,7 @@ impl DArray {
         }
 
         let num_cells = reader.read_i32::<BigEndian>()?;
-        if num_cells > (usize::MAX / size_of::<DACell>()) as i32 {
+        if num_cells as isize > isize::MAX {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "cell count too large",
@@ -283,7 +283,7 @@ pub unsafe extern "C" fn da_insert_branch(
     s: TrieIndex,
     c: TrieChar,
 ) -> TrieIndex {
-    let da = unsafe{d.as_mut()};
+    let da = unsafe { d.as_mut() };
     let mut next: TrieIndex = 0;
     let base = da.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
     if base > TRIE_INDEX_ERROR {

@@ -176,7 +176,7 @@ impl Tail {
         tail.first_free = reader.read_i32::<BigEndian>()?;
         let num_tails = reader.read_i32::<BigEndian>()?;
 
-        if num_tails > (usize::MAX / size_of::<TailBlock>()) as i32 {
+        if num_tails as isize > isize::MAX {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "block count too large",
@@ -201,6 +201,9 @@ impl Tail {
                 suffix[length as usize] = TRIE_CHAR_TERM;
 
                 block.suffix = Some(suffix.into_boxed_slice());
+            } else {
+                // In the C version the reader always create suffix
+                block.suffix = Some(Box::new([TRIE_CHAR_TERM]));
             }
         }
 
