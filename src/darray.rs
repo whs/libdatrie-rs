@@ -134,6 +134,38 @@ impl DArray {
         syms
     }
 
+    fn fit_symbols(&mut self, base: TrieIndex, symbols: &Symbols) -> bool {
+        for sym in symbols.iter().copied() {
+            // if (base + sym) > TRIE_INDEX_MAX which means it's overflow,
+            // or cell [base + sym] is not free, the symbol is not fit.
+            if base > TRIE_INDEX_MAX - sym as TrieIndex || !self.check_free_cell(base+sym as TrieIndex) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Prune off a non-separate path up from the final state `s`.
+    /// If `s` still has some children states, it does nothing. Otherwise,
+    /// it deletes the node and all its parents which become non-separate.
+    pub(crate) fn prune(&mut self, s: TrieIndex) {
+        self.prune_upto(self.get_root(), s)
+    }
+
+    /// Prune off a non-separate path up from the final state `s` to the
+    /// given parent `p`. The prunning stop when either the parent `p`
+    /// is met, or a first non-separate node is found.
+    pub(crate) fn prune_upto(&mut self, p: TrieIndex, s: TrieIndex) {
+        let mut s = s;
+        while p != s && !self.has_children(s) {
+            let parent = self.get_check(s).unwrap();
+            unsafe {
+                da_free_cell(self, s);
+            }
+            s = parent;
+        }
+    }
+
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         if reader.read_i32::<BigEndian>()? != DA_SIGNATURE as i32 {
             return Err(io::Error::new(
@@ -404,20 +436,10 @@ unsafe fn da_find_free_base(mut d: NonNull<DArray>, symbols: &Symbols) -> TrieIn
     return s - first_sym as libc::c_int;
 }
 
-unsafe fn da_fit_symbols(mut d: NonNull<DArray>, mut base: TrieIndex, symbols: &Symbols) -> Bool {
-    let mut i: libc::c_int = 0;
-    i = 0 as libc::c_int;
-    while i < symbols.num() as i32 {
-        let mut sym: TrieChar = symbols.get(i as usize).unwrap();
-        if base > TRIE_INDEX_MAX - sym as libc::c_int
-            || !da_check_free_cell(d, base + sym as libc::c_int)
-        {
-            return FALSE as Bool;
-        }
-        i += 1;
-        i;
-    }
-    return TRUE as Bool;
+#[deprecated(note = "Use d.fit_symbols()")]
+unsafe fn da_fit_symbols(mut d: NonNull<DArray>, base: TrieIndex, symbols: &Symbols) -> Bool {
+    let da = unsafe { d.as_mut() };
+    da.fit_symbols(base, symbols).into()
 }
 
 unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: TrieIndex) {
@@ -498,19 +520,18 @@ unsafe fn da_extend_pool(mut d: *mut DArray, mut to_index: TrieIndex) -> Bool {
     return TRUE as Bool;
 }
 
+#[deprecated(note="Use d.prune()")]
 #[no_mangle]
-pub unsafe extern "C" fn da_prune(mut d: *mut DArray, mut s: TrieIndex) {
-    da_prune_upto(d, da_get_root(d), s);
+pub(crate) extern "C" fn da_prune(mut d: NonNull<DArray>, s: TrieIndex) {
+    let da = unsafe {d.as_mut()};
+    da.prune(s)
 }
 
+#[deprecated(note="Use d.prune_upto()")]
 #[no_mangle]
-pub unsafe extern "C" fn da_prune_upto(mut d: *mut DArray, mut p: TrieIndex, mut s: TrieIndex) {
-    while p != s && !da_has_children(d, s) {
-        let mut parent: TrieIndex = 0;
-        parent = da_get_check(d, s);
-        da_free_cell(d, s);
-        s = parent;
-    }
+pub(crate) unsafe extern "C" fn da_prune_upto(mut d: NonNull<DArray>, p: TrieIndex, s: TrieIndex) {
+    let da = unsafe {d.as_mut()};
+    da.prune_upto(p, s)
 }
 
 unsafe fn da_alloc_cell(mut d: *mut DArray, mut cell: TrieIndex) {
