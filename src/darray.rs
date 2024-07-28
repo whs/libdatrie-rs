@@ -49,6 +49,55 @@ impl DArray {
         unsafe { slice::from_raw_parts_mut(self.cells, self.num_cells as usize) }
     }
 
+    pub(crate) fn get_root(&self) -> TrieIndex {
+        2
+    }
+
+    /// Get BASE cell value for the given state.
+    pub(crate) fn get_base(&self, s: TrieIndex) -> Option<TrieIndex> {
+        self.slice().get(s as usize).map(|v| v.base)
+    }
+
+    /// Set BASE cell for the given state to the given value.
+    pub(crate) fn set_base(&mut self, s: TrieIndex, val: TrieIndex) -> Option<()> {
+        match self.slice_mut().get_mut(s as usize) {
+            Some(cell) => {
+                cell.base = val;
+                Some(())
+            }
+            None => None,
+        }
+    }
+
+    /// Get CHECK cell value for the given state.
+    pub(crate) fn get_check(&self, s: TrieIndex) -> Option<TrieIndex> {
+        self.slice().get(s as usize).map(|v| v.check)
+    }
+
+    /// Set CHECK cell for the given state to the given value.
+    pub(crate) fn set_check(&mut self, s: TrieIndex, val: TrieIndex) -> Option<()> {
+        match self.slice_mut().get_mut(s as usize) {
+            Some(cell) => {
+                cell.check = val;
+                Some(())
+            }
+            None => None,
+        }
+    }
+
+    /// Walk the double-array trie from state `s`, using input character `c`.
+    /// If there exists an edge from `s` with arc labeled `c`, this function
+    /// returns the new state. Otherwise, it returns None.
+    pub(crate) fn walk(&self, s: TrieIndex, c: TrieChar) -> Option<TrieIndex> {
+        // The C code doesn't handle get_base() error here
+        // either it is infallible or it abuses TRIE_INDEX_ERROR
+        let next = self.get_base(s).unwrap() + c as TrieIndex;
+        if self.get_check(next) == Some(s) {
+            return Some(next);
+        }
+        None
+    }
+
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         if reader.read_i32::<BigEndian>()? != DA_SIGNATURE as i32 {
             return Err(io::Error::new(
@@ -181,57 +230,51 @@ pub(crate) unsafe extern "C" fn da_serialize(d: *const DArray, mut ptr: NonNull<
     ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 }
 
+#[deprecated(note = "Use d.get_root()")]
 #[no_mangle]
-pub extern "C" fn da_get_root(d: *const DArray) -> TrieIndex {
-    // TODO: Move into the struct
-    2
+pub(crate) extern "C" fn da_get_root(d: *const DArray) -> TrieIndex {
+    unsafe { &*d }.get_root()
 }
 
+#[deprecated(note = "Use d.get_base().unwrap_or(TRIE_INDEX_ERROR)")]
 #[no_mangle]
-pub unsafe extern "C" fn da_get_base(mut d: *const DArray, mut s: TrieIndex) -> TrieIndex {
-    return if s < (*d).num_cells {
-        (*((*d).cells).offset(s as isize)).base
-    } else {
-        TRIE_INDEX_ERROR
-    };
+pub(crate) extern "C" fn da_get_base(d: *const DArray, s: TrieIndex) -> TrieIndex {
+    let da = unsafe { &*d };
+    da.get_base(s).unwrap_or(TRIE_INDEX_ERROR)
 }
 
+#[deprecated(note = "Use d.get_check().unwrap_or(TRIE_INDEX_ERROR)")]
 #[no_mangle]
-pub unsafe extern "C" fn da_get_check(mut d: *const DArray, mut s: TrieIndex) -> TrieIndex {
-    return if s < (*d).num_cells {
-        (*((*d).cells).offset(s as isize)).check
-    } else {
-        TRIE_INDEX_ERROR
-    };
+pub(crate) extern "C" fn da_get_check(d: *const DArray, s: TrieIndex) -> TrieIndex {
+    let da = unsafe { &*d };
+    da.get_check(s).unwrap_or(TRIE_INDEX_ERROR)
 }
 
+#[deprecated(note = "Use d.set_base() and ignore error")]
 #[no_mangle]
-pub unsafe extern "C" fn da_set_base(mut d: *mut DArray, mut s: TrieIndex, mut val: TrieIndex) {
-    if s < (*d).num_cells {
-        (*((*d).cells).offset(s as isize)).base = val;
+pub(crate) extern "C" fn da_set_base(mut d: NonNull<DArray>, s: TrieIndex, val: TrieIndex) {
+    let da = unsafe { d.as_mut() };
+    let _ = da.set_base(s, val);
+}
+
+#[deprecated(note = "Use d.set_check() and ignore error")]
+#[no_mangle]
+pub unsafe extern "C" fn da_set_check(mut d: NonNull<DArray>, s: TrieIndex, val: TrieIndex) {
+    let da = unsafe { d.as_mut() };
+    let _ = da.set_check(s, val);
+}
+
+#[deprecated(note = "Use Some(*s) = d.walk()")]
+#[no_mangle]
+pub unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool {
+    let da = unsafe { &*d };
+    if let Some(new_s) = da.walk(unsafe { *s }, c) {
+        unsafe {
+            *s = new_s;
+        }
+        return TRUE;
     }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn da_set_check(mut d: *mut DArray, mut s: TrieIndex, mut val: TrieIndex) {
-    if s < (*d).num_cells {
-        (*((*d).cells).offset(s as isize)).check = val;
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn da_walk(
-    mut d: *const DArray,
-    mut s: *mut TrieIndex,
-    mut c: TrieChar,
-) -> Bool {
-    let mut next: TrieIndex = 0;
-    next = da_get_base(d, *s) + c as libc::c_int;
-    if da_get_check(d, next) == *s {
-        *s = next;
-        return TRUE as Bool;
-    }
-    return FALSE as Bool;
+    FALSE
 }
 
 #[no_mangle]
@@ -268,11 +311,11 @@ pub unsafe extern "C" fn da_insert_branch(
         if 0 as libc::c_int == new_base_0 {
             return TRIE_INDEX_ERROR;
         }
-        da_set_base(d, s, new_base_0);
+        da_set_base(NonNull::new_unchecked(d), s, new_base_0);
         next = new_base_0 + c as libc::c_int;
     }
     da_alloc_cell(d, next);
-    da_set_check(d, next, s);
+    da_set_check(NonNull::new_unchecked(d), next, s);
     return next;
 }
 
@@ -382,8 +425,8 @@ unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: T
         new_next = new_base + symbols.get(i as usize).unwrap() as libc::c_int;
         old_next_base = da_get_base(d, old_next);
         da_alloc_cell(d, new_next);
-        da_set_check(d, new_next, s);
-        da_set_base(d, new_next, old_next_base);
+        da_set_check(NonNull::new_unchecked(d), new_next, s);
+        da_set_base(NonNull::new_unchecked(d), new_next, old_next_base);
         if old_next_base > 0 as libc::c_int {
             let mut c: TrieIndex = 0;
             let mut max_c: TrieIndex = 0;
@@ -395,7 +438,7 @@ unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: T
             c = 0 as libc::c_int;
             while c <= max_c {
                 if da_get_check(d, old_next_base + c) == old_next {
-                    da_set_check(d, old_next_base + c, new_next);
+                    da_set_check(NonNull::new_unchecked(d), old_next_base + c, new_next);
                 }
                 c += 1;
                 c;
@@ -405,7 +448,7 @@ unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: T
         i += 1;
         i;
     }
-    da_set_base(d, s, new_base);
+    da_set_base(NonNull::new_unchecked(d), s, new_base);
 }
 
 unsafe fn da_extend_pool(mut d: *mut DArray, mut to_index: TrieIndex) -> Bool {
@@ -432,16 +475,16 @@ unsafe fn da_extend_pool(mut d: *mut DArray, mut to_index: TrieIndex) -> Bool {
     (*d).num_cells = to_index + 1 as libc::c_int;
     i = new_begin;
     while i < to_index {
-        da_set_check(d, i, -(i + 1 as libc::c_int));
-        da_set_base(d, i + 1 as libc::c_int, -i);
+        da_set_check(NonNull::new_unchecked(d), i, -(i + 1 as libc::c_int));
+        da_set_base(NonNull::new_unchecked(d), i + 1 as libc::c_int, -i);
         i += 1;
         i;
     }
     free_tail = -da_get_base(d, 1 as libc::c_int);
-    da_set_check(d, free_tail, -new_begin);
-    da_set_base(d, new_begin, -free_tail);
-    da_set_check(d, to_index, -(1 as libc::c_int));
-    da_set_base(d, 1 as libc::c_int, -to_index);
+    da_set_check(NonNull::new_unchecked(d), free_tail, -new_begin);
+    da_set_base(NonNull::new_unchecked(d), new_begin, -free_tail);
+    da_set_check(NonNull::new_unchecked(d), to_index, -(1 as libc::c_int));
+    da_set_base(NonNull::new_unchecked(d), 1 as libc::c_int, -to_index);
     (*((*d).cells).offset(0 as libc::c_int as isize)).check = (*d).num_cells;
     return TRUE as Bool;
 }
@@ -466,8 +509,8 @@ unsafe fn da_alloc_cell(mut d: *mut DArray, mut cell: TrieIndex) {
     let mut next: TrieIndex = 0;
     prev = -da_get_base(d, cell);
     next = -da_get_check(d, cell);
-    da_set_check(d, prev, -next);
-    da_set_base(d, next, -prev);
+    da_set_check(NonNull::new_unchecked(d), prev, -next);
+    da_set_base(NonNull::new_unchecked(d), next, -prev);
 }
 
 unsafe fn da_free_cell(mut d: *mut DArray, mut cell: TrieIndex) {
@@ -478,10 +521,10 @@ unsafe fn da_free_cell(mut d: *mut DArray, mut cell: TrieIndex) {
         i = -da_get_check(d, i);
     }
     prev = -da_get_base(d, i);
-    da_set_check(d, cell, -i);
-    da_set_base(d, cell, -prev);
-    da_set_check(d, prev, -cell);
-    da_set_base(d, i, -cell);
+    da_set_check(NonNull::new_unchecked(d), cell, -i);
+    da_set_base(NonNull::new_unchecked(d), cell, -prev);
+    da_set_check(NonNull::new_unchecked(d), prev, -cell);
+    da_set_base(NonNull::new_unchecked(d), i, -cell);
 }
 
 #[no_mangle]

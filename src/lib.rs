@@ -8,14 +8,14 @@
 #![feature(extern_types)]
 
 pub mod alpha_map;
-pub mod darray;
+mod darray;
 mod dstring;
 mod fileutils;
 mod symbols;
-pub mod tail;
+mod tail;
 pub mod trie;
-pub mod trie_string;
-mod types;
+mod trie_string;
+pub mod types;
 
 pub mod tests {
     pub mod test_byte_alpha;
