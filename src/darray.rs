@@ -1,6 +1,6 @@
-use std::{cmp, io, ptr};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
+use std::{cmp, io, ptr};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -8,7 +8,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
 use crate::trie_string::{
-    TRIE_CHAR_MAX, trie_string_append_char, trie_string_cut_last, TrieChar, TrieString,
+    trie_string_append_char, trie_string_cut_last, TrieChar, TrieString, TRIE_CHAR_MAX,
 };
 use crate::types::*;
 
@@ -141,7 +141,7 @@ impl DArray {
         if s == self.get_free_list() {
             s = first_sym as TrieIndex + DA_POOL_BEGIN;
             loop {
-                if unsafe { !da_extend_pool(self.into(), s) } {
+                if !self.extend_pool(s) {
                     return TRIE_INDEX_ERROR;
                 }
                 if self.get_check(s).unwrap() < 0 {
@@ -329,7 +329,7 @@ pub(crate) extern "C" fn da_new() -> *mut DArray {
 
 #[deprecated(note = "Use DArray::read(). Careful about file position on failure!")]
 #[no_mangle]
-pub(crate) extern "C" fn da_fread(mut file: NonNull<libc::FILE>) -> *mut DArray {
+pub(crate) extern "C" fn da_fread(file: NonNull<libc::FILE>) -> *mut DArray {
     let mut file = wrap_cfile_nonnull(file);
     let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
 
@@ -350,7 +350,7 @@ pub(crate) unsafe extern "C" fn da_free(mut d: NonNull<DArray>) {
 
 #[deprecated(note = "Use DArray::serialize()")]
 #[no_mangle]
-pub(crate) extern "C" fn da_fwrite(d: *const DArray, mut file: NonNull<libc::FILE>) -> i32 {
+pub(crate) extern "C" fn da_fwrite(d: *const DArray, file: NonNull<libc::FILE>) -> i32 {
     let mut file = wrap_cfile_nonnull(file);
 
     let da = unsafe { &*d };
@@ -443,20 +443,20 @@ pub unsafe extern "C" fn da_insert_branch(
         if base > TRIE_INDEX_MAX - c as libc::c_int || !da.check_free_cell(next) {
             let mut symbols = Symbols::default();
             let mut new_base: TrieIndex = 0;
-            symbols = da_output_symbols(d.as_ref(), s);
+            symbols = da.output_symbols(s);
             symbols.add(c);
-            new_base = da_find_free_base(da.into(), &symbols);
+            new_base = da.find_free_base(&symbols);
             if 0 as libc::c_int == new_base {
                 return TRIE_INDEX_ERROR;
             }
-            da_relocate_base(da, s, new_base);
+            da_relocate_base(d, s, new_base);
             next = new_base + c as libc::c_int;
         }
     } else {
         let mut new_base_0: TrieIndex = 0;
         let mut symbols_0 = Symbols::default();
         symbols_0.add(c);
-        new_base_0 = da_find_free_base(da.into(), &symbols_0);
+        new_base_0 = da.find_free_base(&symbols_0);
         if 0 as libc::c_int == new_base_0 {
             return TRIE_INDEX_ERROR;
         }
@@ -498,12 +498,13 @@ unsafe fn da_fit_symbols(mut d: NonNull<DArray>, base: TrieIndex, symbols: &Symb
     da.fit_symbols(base, symbols).into()
 }
 
-unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: TrieIndex) {
+unsafe fn da_relocate_base(mut d: NonNull<DArray>, s: TrieIndex, new_base: TrieIndex) {
     // TODO: Port
+    let da = unsafe { d.as_mut() };
     let mut old_base: TrieIndex = 0;
     let mut i: libc::c_int = 0;
-    old_base = da_get_base(d, s);
-    let symbols = da_output_symbols(d, s);
+    old_base = da.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
+    let symbols = da.output_symbols(s);
     i = 0 as libc::c_int;
     while i < symbols.num() as i32 {
         let mut old_next: TrieIndex = 0;
@@ -511,33 +512,32 @@ unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: T
         let mut old_next_base: TrieIndex = 0;
         old_next = old_base + symbols.get(i as usize).unwrap() as libc::c_int;
         new_next = new_base + symbols.get(i as usize).unwrap() as libc::c_int;
-        old_next_base = da_get_base(d, old_next);
-        da_alloc_cell(NonNull::new_unchecked(d), new_next);
-        da_set_check(NonNull::new_unchecked(d), new_next, s);
-        da_set_base(NonNull::new_unchecked(d), new_next, old_next_base);
+        old_next_base = da.get_base(old_next).unwrap_or(TRIE_INDEX_ERROR);
+        da.alloc_cell(new_next);
+        da.set_check(new_next, s);
+        da.set_base(new_next, old_next_base);
         if old_next_base > 0 as libc::c_int {
             let mut c: TrieIndex = 0;
             let mut max_c: TrieIndex = 0;
             max_c = cmp::min(
                 TRIE_CHAR_MAX as TrieIndex,
-                (*d).cells.len() as TrieIndex - old_next_base,
+                da.cells.len() as TrieIndex - old_next_base,
             );
             c = 0 as libc::c_int;
             while c <= max_c {
-                if da_get_check(d, old_next_base + c) == old_next {
-                    da_set_check(NonNull::new_unchecked(d), old_next_base + c, new_next);
+                if da.get_check(old_next_base + c) == Some(old_next) {
+                    da.set_check(old_next_base + c, new_next);
                 }
                 c += 1;
-                c;
             }
         }
-        da_free_cell(NonNull::new_unchecked(d), old_next);
+        da.free_cell(old_next);
         i += 1;
-        i;
     }
-    da_set_base(NonNull::new_unchecked(d), s, new_base);
+    da.set_base(s, new_base);
 }
 
+#[deprecated(note = "Use da.extend_pool()")]
 fn da_extend_pool(mut d: NonNull<DArray>, to_index: TrieIndex) -> Bool {
     let da = unsafe { d.as_mut() };
     da.extend_pool(to_index).into()
@@ -571,30 +571,30 @@ fn da_free_cell(mut d: NonNull<DArray>, cell: TrieIndex) {
 
 #[no_mangle]
 pub unsafe extern "C" fn da_first_separate(
-    mut d: *mut DArray,
+    mut d: NonNull<DArray>,
     mut root: TrieIndex,
-    mut keybuff: *mut TrieString,
+    keybuff: *mut TrieString,
 ) -> TrieIndex {
+    let da = unsafe { d.as_mut() };
     // TODO: Port
     let mut base: TrieIndex = 0;
     let mut c: TrieIndex = 0;
     let mut max_c: TrieIndex = 0;
     loop {
-        base = da_get_base(d, root);
+        base = da.get_base(root).unwrap_or(TRIE_INDEX_ERROR);
         if !(base >= 0 as libc::c_int) {
             break;
         }
         max_c = cmp::min(
             TRIE_CHAR_MAX as TrieIndex,
-            (*d).cells.len() as TrieIndex - base,
+            da.cells.len() as TrieIndex - base,
         );
         c = 0 as libc::c_int;
         while c <= max_c {
-            if da_get_check(d, base + c) == root {
+            if da.get_check(base + c) == Some(root) {
                 break;
             }
             c += 1;
-            c;
         }
         if c > max_c {
             return TRIE_INDEX_ERROR;
@@ -607,31 +607,32 @@ pub unsafe extern "C" fn da_first_separate(
 
 #[no_mangle]
 pub unsafe extern "C" fn da_next_separate(
-    mut d: *mut DArray,
-    mut root: TrieIndex,
+    mut d: NonNull<DArray>,
+    root: TrieIndex,
     mut sep: TrieIndex,
-    mut keybuff: *mut TrieString,
+    keybuff: *mut TrieString,
 ) -> TrieIndex {
+    let da = unsafe { d.as_mut() };
     // TODO: Port
     let mut parent: TrieIndex = 0;
     let mut base: TrieIndex = 0;
     let mut c: TrieIndex = 0;
     let mut max_c: TrieIndex = 0;
     while sep != root {
-        parent = da_get_check(d, sep);
-        base = da_get_base(d, parent);
+        parent = da.get_check(sep).unwrap_or(TRIE_INDEX_ERROR);
+        base = da.get_base(parent).unwrap_or(TRIE_INDEX_ERROR);
         c = sep - base;
         trie_string_cut_last(keybuff);
         max_c = cmp::min(
             TRIE_CHAR_MAX as TrieIndex,
-            (*d).cells.len() as TrieIndex - base,
+            da.cells.len() as TrieIndex - base,
         );
         loop {
             c += 1;
             if !(c <= max_c) {
                 break;
             }
-            if da_get_check(d, base + c) == parent {
+            if da.get_check(base + c) == Some(parent) {
                 trie_string_append_char(keybuff, c as TrieChar);
                 return da_first_separate(d, base + c, keybuff);
             }

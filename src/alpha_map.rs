@@ -159,7 +159,7 @@ pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
 
 #[deprecated(note = "Use a_map::clone()")]
 #[no_mangle]
-pub extern "C" fn alpha_map_clone(mut a_map: *const AlphaMap) -> *mut AlphaMap {
+pub extern "C" fn alpha_map_clone(a_map: *const AlphaMap) -> *mut AlphaMap {
     let Some(am) = (unsafe { a_map.as_ref() }) else {
         return ptr::null_mut();
     };
@@ -265,7 +265,7 @@ pub(crate) extern "C" fn alpha_map_trie_to_char(
 #[no_mangle]
 pub(crate) extern "C" fn alpha_map_char_to_trie_str(
     alpha_map: *const AlphaMap,
-    mut str: *const AlphaChar,
+    str: *const AlphaChar,
 ) -> *mut TrieChar {
     let str = unsafe { slice::from_raw_parts(str, alpha_char_strlen(str) as usize) };
     let am = unsafe { &*alpha_map };

@@ -127,7 +127,7 @@ impl Tail {
     }
 
     fn alloc_block(&mut self) -> TrieIndex {
-        let mut block_idx;
+        let block_idx;
         if self.first_free != 0 {
             block_idx = self.first_free;
             self.first_free = self.tails[block_idx as usize].next_free;
@@ -292,13 +292,13 @@ pub(crate) extern "C" fn tail_new() -> *mut Tail {
 
 #[deprecated(note = "Use Tail::read(). Careful about file position on failure!")]
 #[no_mangle]
-pub(crate) extern "C" fn tail_fread(mut file: NonNull<libc::FILE>) -> *mut Tail {
+pub(crate) extern "C" fn tail_fread(file: NonNull<libc::FILE>) -> *mut Tail {
     let mut file = wrap_cfile_nonnull(file);
     let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
 
     match Tail::read(&mut file) {
         Ok(tail) => Box::into_raw(Box::new(tail)),
-        Err(e) => {
+        Err(_) => {
             // Return to save_pos if read fail
             let _ = file.seek(SeekFrom::Start(save_pos));
             return ptr::null_mut();
@@ -307,7 +307,7 @@ pub(crate) extern "C" fn tail_fread(mut file: NonNull<libc::FILE>) -> *mut Tail 
 }
 
 #[no_mangle]
-pub(crate) unsafe extern "C" fn tail_free(mut t: NonNull<Tail>) {
+pub(crate) unsafe extern "C" fn tail_free(t: NonNull<Tail>) {
     let tail = Box::from_raw(t.as_ptr());
     drop(tail);
 }
@@ -347,10 +347,7 @@ pub(crate) unsafe extern "C" fn tail_serialize(
 
 #[deprecated(note = "Use t.get_suffix()")]
 #[no_mangle]
-pub(crate) extern "C" fn tail_get_suffix(
-    mut t: *const Tail,
-    mut index: TrieIndex,
-) -> *const TrieChar {
+pub(crate) extern "C" fn tail_get_suffix(t: *const Tail, index: TrieIndex) -> *const TrieChar {
     let tail = unsafe { &*t };
     match tail.get_suffix(index as usize) {
         Some(v) => v.as_ptr(),
@@ -384,7 +381,7 @@ pub(crate) unsafe extern "C" fn tail_add_suffix(
 
 #[deprecated(note = "Use t.get_data().unwrap_or(TRIE_DATA_ERROR)")]
 #[no_mangle]
-pub(crate) extern "C" fn tail_get_data(mut t: *const Tail, mut index: TrieIndex) -> TrieData {
+pub(crate) extern "C" fn tail_get_data(t: *const Tail, index: TrieIndex) -> TrieData {
     let tail = unsafe { &*t };
     match tail.get_data(index as usize) {
         Some(v) => v,

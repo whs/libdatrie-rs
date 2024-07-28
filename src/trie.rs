@@ -117,6 +117,7 @@ pub const FALSE: libc::c_int = DA_FALSE as libc::c_int;
 pub const NULL: libc::c_int = 0 as libc::c_int;
 #[no_mangle]
 pub unsafe extern "C" fn trie_new(mut alpha_map: *const AlphaMap) -> *mut Trie {
+    println!("trie_new: Rust!");
     let mut trie: *mut Trie = 0 as *mut Trie;
     trie = malloc(::core::mem::size_of::<Trie>() as libc::c_ulong) as *mut Trie;
     if trie.is_null() {
@@ -141,6 +142,7 @@ pub unsafe extern "C" fn trie_new(mut alpha_map: *const AlphaMap) -> *mut Trie {
 }
 #[no_mangle]
 pub unsafe extern "C" fn trie_new_from_file(mut path: *const libc::c_char) -> *mut Trie {
+    println!("trie_new_from_file: Rust!");
     let mut trie: *mut Trie = 0 as *mut Trie;
     let mut trie_file: *mut FILE = 0 as *mut FILE;
     trie_file = fopen(path, b"rb\0" as *const u8 as *const libc::c_char);
