@@ -298,7 +298,7 @@ pub(crate) extern "C" fn tail_fread(mut file: NonNull<libc::FILE>) -> *mut Tail 
 
     match Tail::read(&mut file) {
         Ok(tail) => Box::into_raw(Box::new(tail)),
-        Err(_) => {
+        Err(e) => {
             // Return to save_pos if read fail
             let _ = file.seek(SeekFrom::Start(save_pos));
             return ptr::null_mut();

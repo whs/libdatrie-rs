@@ -1,6 +1,6 @@
+use std::{cmp, io, ptr};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
-use std::{cmp, io, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -8,18 +8,11 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
 use crate::trie_string::{
-    trie_string_append_char, trie_string_cut_last, TrieChar, TrieString, TRIE_CHAR_MAX,
+    TRIE_CHAR_MAX, trie_string_append_char, trie_string_cut_last, TrieChar, TrieString,
 };
 use crate::types::*;
 
-extern "C" {
-    fn memmove(_: *mut libc::c_void, _: *const libc::c_void, _: libc::c_ulong)
-        -> *mut libc::c_void;
-    fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
-    fn realloc(_: *mut libc::c_void, _: libc::c_ulong) -> *mut libc::c_void;
-    fn free(_: *mut libc::c_void);
-}
-
+#[derive(Default, Clone)]
 #[repr(C)]
 pub(crate) struct DACell {
     base: TrieIndex,
@@ -28,9 +21,7 @@ pub(crate) struct DACell {
 
 #[repr(C)]
 pub(crate) struct DArray {
-    num_cells: TrieIndex,
-    // TODO: This should be Vec
-    cells: *mut DACell,
+    cells: Vec<DACell>,
 }
 
 const DA_SIGNATURE: u32 = 0xdafcdafc;
@@ -43,14 +34,6 @@ const DA_SIGNATURE: u32 = 0xdafcdafc;
 const DA_POOL_BEGIN: TrieIndex = 3;
 
 impl DArray {
-    fn slice(&self) -> &[DACell] {
-        unsafe { slice::from_raw_parts(self.cells, self.num_cells as usize) }
-    }
-
-    fn slice_mut(&self) -> &mut [DACell] {
-        unsafe { slice::from_raw_parts_mut(self.cells, self.num_cells as usize) }
-    }
-
     pub(crate) fn get_free_list(&self) -> TrieIndex {
         1
     }
@@ -61,12 +44,12 @@ impl DArray {
 
     /// Get BASE cell value for the given state.
     pub(crate) fn get_base(&self, s: TrieIndex) -> Option<TrieIndex> {
-        self.slice().get(s as usize).map(|v| v.base)
+        self.cells.get(s as usize).map(|v| v.base)
     }
 
     /// Set BASE cell for the given state to the given value.
     pub(crate) fn set_base(&mut self, s: TrieIndex, val: TrieIndex) -> Option<()> {
-        match self.slice_mut().get_mut(s as usize) {
+        match self.cells.get_mut(s as usize) {
             Some(cell) => {
                 cell.base = val;
                 Some(())
@@ -77,12 +60,12 @@ impl DArray {
 
     /// Get CHECK cell value for the given state.
     pub(crate) fn get_check(&self, s: TrieIndex) -> Option<TrieIndex> {
-        self.slice().get(s as usize).map(|v| v.check)
+        self.cells.get(s as usize).map(|v| v.check)
     }
 
     /// Set CHECK cell for the given state to the given value.
     pub(crate) fn set_check(&mut self, s: TrieIndex, val: TrieIndex) -> Option<()> {
-        match self.slice_mut().get_mut(s as usize) {
+        match self.cells.get_mut(s as usize) {
             Some(cell) => {
                 cell.check = val;
                 Some(())
@@ -105,8 +88,12 @@ impl DArray {
     }
 
     fn check_free_cell(&mut self, s: TrieIndex) -> bool {
-        unsafe {
-            da_extend_pool(self, s).into() && self.get_check(s).unwrap_or(TRIE_INDEX_ERROR) < 0
+        if !self.extend_pool(s) {
+            return false;
+        }
+        match self.get_check(s) {
+            Some(v) if v < 0 => true,
+            _ => false,
         }
     }
 
@@ -117,7 +104,10 @@ impl DArray {
         if base < 0 {
             return false;
         }
-        let max_c = cmp::min(TRIE_CHAR_MAX as TrieIndex, self.num_cells - base);
+        let max_c = cmp::min(
+            TRIE_CHAR_MAX as TrieIndex,
+            self.cells.len() as TrieIndex - base,
+        );
         for c in 0..=max_c {
             if self.get_check(base + c) == Some(s) {
                 return true;
@@ -129,7 +119,10 @@ impl DArray {
     pub(crate) fn output_symbols(&self, s: TrieIndex) -> Symbols {
         let mut syms = Symbols::default();
         let base = self.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
-        let max_c = cmp::min(TrieChar::MAX as TrieIndex, self.num_cells - base);
+        let max_c = cmp::min(
+            TrieChar::MAX as TrieIndex,
+            self.cells.len() as TrieIndex - base,
+        );
         for c in 0..=max_c {
             if self.get_check(base + c) == Some(s) {
                 syms.add_fast(c as TrieChar);
@@ -148,7 +141,7 @@ impl DArray {
         if s == self.get_free_list() {
             s = first_sym as TrieIndex + DA_POOL_BEGIN;
             loop {
-                if unsafe { !da_extend_pool(self, s) } {
+                if unsafe { !da_extend_pool(self.into(), s) } {
                     return TRIE_INDEX_ERROR;
                 }
                 if self.get_check(s).unwrap() < 0 {
@@ -162,7 +155,7 @@ impl DArray {
         while !self.fit_symbols(s - first_sym as TrieIndex, symbols) {
             // extend pool before getting exhausted
             if -self.get_check(s).unwrap() == self.get_free_list() {
-                if unsafe { !da_extend_pool(self, self.num_cells) } {
+                if !self.extend_pool(self.cells.len() as TrieIndex) {
                     // unlikely
                     return TRIE_INDEX_ERROR;
                 }
@@ -183,6 +176,37 @@ impl DArray {
                 return false;
             }
         }
+        true
+    }
+
+    fn extend_pool(&mut self, to_index: TrieIndex) -> bool {
+        if to_index <= 0 || to_index >= TRIE_INDEX_MAX {
+            return false;
+        }
+        if to_index < self.cells.len() as TrieIndex {
+            return true;
+        }
+
+        let new_begin = self.cells.len() as TrieIndex;
+        self.cells
+            .resize((to_index + 1) as usize, DACell::default());
+
+        // initialize the new free list
+        for i in new_begin..to_index {
+            self.set_check(i, -(i + 1));
+            self.set_base(i + 1, -i);
+        }
+
+        // merge the new circular list to the old
+        let free_tail = -self.get_base(self.get_free_list()).unwrap();
+        self.set_check(free_tail, -new_begin);
+        self.set_base(new_begin, -free_tail);
+        self.set_check(to_index, -self.get_free_list());
+        self.set_base(self.get_free_list(), -to_index);
+
+        // update header cell
+        self.cells[0].check = self.cells.len() as TrieIndex;
+
         true
     }
 
@@ -226,14 +250,15 @@ impl DArray {
     }
 
     pub(crate) fn get_serialized_size(&self) -> usize {
-        if self.num_cells > 0 {
-            4 * self.num_cells as usize * 2 // `base` and `check`
+        if !self.cells.is_empty() {
+            4 * self.cells.len() * 2 // `base` and `check`
         } else {
             0
         }
     }
 
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
+        // check signature
         if reader.read_i32::<BigEndian>()? != DA_SIGNATURE as i32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -241,6 +266,7 @@ impl DArray {
             ));
         }
 
+        // read number of cells
         let num_cells = reader.read_i32::<BigEndian>()?;
         if num_cells as isize > isize::MAX {
             return Err(io::Error::new(
@@ -249,23 +275,24 @@ impl DArray {
             ));
         }
 
-        let cells: *mut DACell =
-            unsafe { malloc((num_cells as usize * size_of::<DACell>()) as libc::c_ulong).cast() };
-        let cells_slice = unsafe { slice::from_raw_parts_mut(cells, num_cells as usize) };
+        let mut cells = Vec::with_capacity(num_cells as usize);
+        cells.push(DACell {
+            base: DA_SIGNATURE as TrieIndex,
+            check: num_cells,
+        });
 
-        cells_slice[0].base = DA_SIGNATURE as TrieIndex;
-        cells_slice[0].check = num_cells;
-
-        for i in 1..(num_cells as usize) {
-            cells_slice[i].base = reader.read_i32::<BigEndian>()?;
-            cells_slice[i].check = reader.read_i32::<BigEndian>()?;
+        for _ in 1..(num_cells as usize) {
+            cells.push(DACell {
+                base: reader.read_i32::<BigEndian>()?,
+                check: reader.read_i32::<BigEndian>()?,
+            });
         }
 
-        Ok(Self { num_cells, cells })
+        Ok(Self { cells })
     }
 
     pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
-        for cell in self.slice() {
+        for cell in &self.cells {
             writer.write_i32::<BigEndian>(cell.base)?;
             writer.write_i32::<BigEndian>(cell.check)?;
         }
@@ -275,31 +302,21 @@ impl DArray {
 
 impl Default for DArray {
     fn default() -> Self {
-        let len = DA_POOL_BEGIN;
-        let cells_ptr: *mut DACell =
-            unsafe { malloc((len as usize * size_of::<DACell>()) as libc::c_ulong).cast() };
-        let cells = unsafe { slice::from_raw_parts_mut(cells_ptr, len as usize) };
-
-        cells[0].base = DA_SIGNATURE as TrieIndex;
-        cells[0].check = len;
-
-        cells[1].base = -1;
-        cells[1].check = -1;
-
-        cells[2].base = DA_POOL_BEGIN;
-        cells[2].check = 0;
-
         Self {
-            num_cells: DA_POOL_BEGIN,
-            cells: cells_ptr,
-        }
-    }
-}
-
-impl Drop for DArray {
-    fn drop(&mut self) {
-        unsafe {
-            free(self.cells.cast());
+            cells: vec![
+                DACell {
+                    base: DA_SIGNATURE as TrieIndex,
+                    check: 3, // length of this
+                },
+                DACell {
+                    base: -1,
+                    check: -1,
+                },
+                DACell {
+                    base: DA_POOL_BEGIN,
+                    check: 0,
+                },
+            ],
         }
     }
 }
@@ -501,11 +518,10 @@ unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: T
         if old_next_base > 0 as libc::c_int {
             let mut c: TrieIndex = 0;
             let mut max_c: TrieIndex = 0;
-            max_c = if (255 as libc::c_int) < (*d).num_cells - old_next_base {
-                255 as libc::c_int
-            } else {
-                (*d).num_cells - old_next_base
-            };
+            max_c = cmp::min(
+                TRIE_CHAR_MAX as TrieIndex,
+                (*d).cells.len() as TrieIndex - old_next_base,
+            );
             c = 0 as libc::c_int;
             while c <= max_c {
                 if da_get_check(d, old_next_base + c) == old_next {
@@ -522,43 +538,9 @@ unsafe fn da_relocate_base(mut d: *mut DArray, mut s: TrieIndex, mut new_base: T
     da_set_base(NonNull::new_unchecked(d), s, new_base);
 }
 
-unsafe fn da_extend_pool(mut d: *mut DArray, mut to_index: TrieIndex) -> Bool {
-    // TODO: Port
-    let mut new_block: *mut libc::c_void = 0 as *mut libc::c_void;
-    let mut new_begin: TrieIndex = 0;
-    let mut i: TrieIndex = 0;
-    let mut free_tail: TrieIndex = 0;
-    if to_index <= 0 as libc::c_int || 0x7fffffff as libc::c_int <= to_index {
-        return FALSE as Bool;
-    }
-    if to_index < (*d).num_cells {
-        return TRUE as Bool;
-    }
-    new_block = realloc(
-        (*d).cells as *mut libc::c_void,
-        ((to_index + 1 as libc::c_int) as libc::c_ulong)
-            .wrapping_mul(::core::mem::size_of::<DACell>() as libc::c_ulong),
-    );
-    if new_block.is_null() {
-        return FALSE as Bool;
-    }
-    (*d).cells = new_block as *mut DACell;
-    new_begin = (*d).num_cells;
-    (*d).num_cells = to_index + 1 as libc::c_int;
-    i = new_begin;
-    while i < to_index {
-        da_set_check(NonNull::new_unchecked(d), i, -(i + 1 as libc::c_int));
-        da_set_base(NonNull::new_unchecked(d), i + 1 as libc::c_int, -i);
-        i += 1;
-        i;
-    }
-    free_tail = -da_get_base(d, 1 as libc::c_int);
-    da_set_check(NonNull::new_unchecked(d), free_tail, -new_begin);
-    da_set_base(NonNull::new_unchecked(d), new_begin, -free_tail);
-    da_set_check(NonNull::new_unchecked(d), to_index, -(1 as libc::c_int));
-    da_set_base(NonNull::new_unchecked(d), 1 as libc::c_int, -to_index);
-    (*((*d).cells).offset(0 as libc::c_int as isize)).check = (*d).num_cells;
-    return TRUE as Bool;
+fn da_extend_pool(mut d: NonNull<DArray>, to_index: TrieIndex) -> Bool {
+    let da = unsafe { d.as_mut() };
+    da.extend_pool(to_index).into()
 }
 
 #[deprecated(note = "Use d.prune()")]
@@ -602,11 +584,10 @@ pub unsafe extern "C" fn da_first_separate(
         if !(base >= 0 as libc::c_int) {
             break;
         }
-        max_c = if (255 as libc::c_int) < (*d).num_cells - base {
-            255 as libc::c_int
-        } else {
-            (*d).num_cells - base
-        };
+        max_c = cmp::min(
+            TRIE_CHAR_MAX as TrieIndex,
+            (*d).cells.len() as TrieIndex - base,
+        );
         c = 0 as libc::c_int;
         while c <= max_c {
             if da_get_check(d, base + c) == root {
@@ -641,11 +622,10 @@ pub unsafe extern "C" fn da_next_separate(
         base = da_get_base(d, parent);
         c = sep - base;
         trie_string_cut_last(keybuff);
-        max_c = if (255 as libc::c_int) < (*d).num_cells - base {
-            255 as libc::c_int
-        } else {
-            (*d).num_cells - base
-        };
+        max_c = cmp::min(
+            TRIE_CHAR_MAX as TrieIndex,
+            (*d).cells.len() as TrieIndex - base,
+        );
         loop {
             c += 1;
             if !(c <= max_c) {

@@ -163,13 +163,18 @@ pub unsafe extern "C" fn trie_fread(mut file: NonNull<libc::FILE>) -> *mut Trie 
         if !((*trie).da).is_null() {
             (*trie).tail = tail_fread(file);
             if ((*trie).tail).is_null() {
+                panic!("tail is null");
                 da_free((*trie).da);
             } else {
                 (*trie).is_dirty = FALSE as Bool;
                 return trie;
             }
+        } else {
+            panic!("da is null");
         }
         alpha_map_free((*trie).alpha_map);
+    } else {
+        panic!("alpha_map is null");
     }
     free(trie as *mut libc::c_void);
     return NULL as *mut Trie;
