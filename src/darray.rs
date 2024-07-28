@@ -264,7 +264,7 @@ pub unsafe extern "C" fn da_set_check(mut d: NonNull<DArray>, s: TrieIndex, val:
     let _ = da.set_check(s, val);
 }
 
-#[deprecated(note = "Use Some(*s) = d.walk()")]
+#[deprecated(note = "Use Some(*s) = d.walk(s, c)")]
 #[no_mangle]
 pub unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool {
     let da = unsafe { &*d };
@@ -279,43 +279,43 @@ pub unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieCha
 
 #[no_mangle]
 pub unsafe extern "C" fn da_insert_branch(
-    mut d: *mut DArray,
-    mut s: TrieIndex,
-    mut c: TrieChar,
+    mut d: NonNull<DArray>,
+    s: TrieIndex,
+    c: TrieChar,
 ) -> TrieIndex {
-    let mut base: TrieIndex = 0;
+    let da = unsafe{d.as_mut()};
     let mut next: TrieIndex = 0;
-    base = da_get_base(d, s);
-    if base > 0 as libc::c_int {
+    let base = da.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
+    if base > TRIE_INDEX_ERROR {
         next = base + c as libc::c_int;
-        if da_get_check(d, next) == s {
+        if da.get_check(next) == Some(s) {
             return next;
         }
-        if base > TRIE_INDEX_MAX - c as libc::c_int || da_check_free_cell(d, next) as u64 == 0 {
+        if base > TRIE_INDEX_MAX - c as libc::c_int || da_check_free_cell(da, next) as u64 == 0 {
             let mut symbols = Symbols::default();
             let mut new_base: TrieIndex = 0;
-            symbols = da_output_symbols(d, s);
+            symbols = da_output_symbols(d.as_ref(), s);
             symbols.add(c);
-            new_base = da_find_free_base(d, &symbols);
+            new_base = da_find_free_base(da, &symbols);
             if 0 as libc::c_int == new_base {
                 return TRIE_INDEX_ERROR;
             }
-            da_relocate_base(d, s, new_base);
+            da_relocate_base(da, s, new_base);
             next = new_base + c as libc::c_int;
         }
     } else {
         let mut new_base_0: TrieIndex = 0;
         let mut symbols_0 = Symbols::default();
         symbols_0.add(c);
-        new_base_0 = da_find_free_base(d, &symbols_0);
+        new_base_0 = da_find_free_base(da, &symbols_0);
         if 0 as libc::c_int == new_base_0 {
             return TRIE_INDEX_ERROR;
         }
-        da_set_base(NonNull::new_unchecked(d), s, new_base_0);
+        da.set_base(s, new_base_0);
         next = new_base_0 + c as libc::c_int;
     }
-    da_alloc_cell(d, next);
-    da_set_check(NonNull::new_unchecked(d), next, s);
+    da_alloc_cell(da, next);
+    da.set_check(next, s);
     return next;
 }
 
