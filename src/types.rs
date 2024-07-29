@@ -2,7 +2,7 @@ use null_terminated::Nul;
 use std::cmp::Ordering;
 use std::ops::{Deref, Not};
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
 pub(crate) struct Bool(u32);
 
@@ -16,6 +16,16 @@ impl From<bool> for Bool {
         match value {
             true => TRUE,
             false => FALSE,
+        }
+    }
+}
+
+impl From<i16> for Bool {
+    fn from(value: i16) -> Self {
+        match value {
+            1 => TRUE,
+            0 => FALSE,
+            _ => unreachable!(),
         }
     }
 }

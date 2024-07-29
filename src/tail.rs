@@ -249,7 +249,6 @@ impl Tail {
 }
 
 #[derive(Clone)]
-#[repr(C)]
 pub(crate) struct TailBlock {
     next_free: TrieIndex,
     data: Option<TrieData>,

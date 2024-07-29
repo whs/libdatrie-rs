@@ -11,13 +11,11 @@ use crate::trie_string::{TrieChar, TrieString, TRIE_CHAR_MAX};
 use crate::types::*;
 
 #[derive(Default, Clone)]
-#[repr(C)]
 pub(crate) struct DACell {
     base: TrieIndex,
     check: TrieIndex,
 }
 
-#[repr(C)]
 pub(crate) struct DArray {
     cells: Vec<DACell>,
 }
