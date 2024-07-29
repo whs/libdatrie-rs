@@ -1,3 +1,4 @@
+use std::io::{BufReader, Read};
 use crate::alpha_map::{
     alpha_map_char_to_trie, alpha_map_char_to_trie_str, alpha_map_clone, alpha_map_fread_bin,
     alpha_map_free, alpha_map_fwrite_bin, alpha_map_get_serialized_size, alpha_map_serialize_bin,
@@ -19,8 +20,13 @@ use crate::trie_string::{
 };
 use crate::types::*;
 use ::libc;
-use std::mem;
+use std::{io, mem, ptr};
+use std::ffi::{CStr, OsStr};
+use std::fs::{File, OpenOptions};
+use std::os::unix::prelude::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
+use crate::fileutils::wrap_cfile_nonnull;
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
@@ -56,6 +62,27 @@ impl Trie {
             tail: Box::into_raw(Box::new(Tail::default())),
             is_dirty: TRUE,
         }
+    }
+
+    pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let mut fp = BufReader::new(File::open(path)?);
+        Self::from_reader(&mut fp)
+    }
+
+    /// Create a new trie and initialize its contents by reading from a reader.
+    /// This function guaranteed that only the trie has been read from the reader.
+    /// This can be useful for embedding trie index as part of file data.
+    pub fn from_reader<T: Read>(reader: &mut T) -> io::Result<Self> {
+        let alpha_map = AlphaMap::read(reader)?;
+        let da = DArray::read(reader)?;
+        let tail = Tail::read(reader)?;
+
+        Ok(Self {
+            alpha_map: Box::into_raw(Box::new(alpha_map)),
+            da: Box::into_raw(Box::new(da)),
+            tail: Box::into_raw(Box::new(tail)),
+            is_dirty: FALSE,
+        })
     }
 
     /// Returns size that would be occupied by a trie if it was
@@ -114,47 +141,22 @@ pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
     Box::into_raw(Box::new(trie))
 }
 
+#[deprecated(note="Use Trie::from_file()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_new_from_file(mut path: *const libc::c_char) -> *mut Trie {
+pub extern "C" fn trie_new_from_file(path: *const libc::c_char) -> *mut Trie {
     println!("trie_new_from_file: Rust!");
-    let mut trie: *mut Trie = 0 as *mut Trie;
-    let mut trie_file: *mut FILE = 0 as *mut FILE;
-    trie_file = fopen(path, b"rb\0" as *const u8 as *const libc::c_char);
-    if trie_file.is_null() {
-        return NULL as *mut Trie;
-    }
-    trie = trie_fread(NonNull::new_unchecked(trie_file));
-    fclose(trie_file);
-    return trie;
+    let str = unsafe { CStr::from_ptr(path) };
+    let osstr = OsStr::from_bytes(str.to_bytes());
+    let Ok(trie) = Trie::from_file(osstr) else { return ptr::null_mut() };
+    Box::into_raw(Box::new(trie))
 }
 
+#[deprecated(note="Use Trie::from_reader()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_fread(mut file: NonNull<libc::FILE>) -> *mut Trie {
-    let trie = malloc(size_of::<Trie>() as libc::c_ulong) as *mut Trie;
-    if trie.is_null() {
-        return NULL as *mut Trie;
-    }
-    (*trie).alpha_map = alpha_map_fread_bin(file);
-    if !((*trie).alpha_map).is_null() {
-        (*trie).da = da_fread(file);
-        if !((*trie).da).is_null() {
-            (*trie).tail = tail_fread(file);
-            if ((*trie).tail).is_null() {
-                panic!("tail is null");
-                da_free(NonNull::new_unchecked((*trie).da));
-            } else {
-                (*trie).is_dirty = FALSE as Bool;
-                return trie;
-            }
-        } else {
-            panic!("da is null");
-        }
-        alpha_map_free(NonNull::new_unchecked((*trie).alpha_map));
-    } else {
-        panic!("alpha_map is null");
-    }
-    free(trie as *mut libc::c_void);
-    return NULL as *mut Trie;
+pub extern "C" fn trie_fread(mut file: NonNull<libc::FILE>) -> *mut Trie {
+    let mut file = wrap_cfile_nonnull(file);
+    let Ok(trie) = Trie::from_reader(&mut file) else { return ptr::null_mut() };
+    Box::into_raw(Box::new(trie))
 }
 
 #[no_mangle]
