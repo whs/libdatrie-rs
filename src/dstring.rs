@@ -1,7 +1,8 @@
+use std::io::Write;
 use crate::types::*;
 use libc;
 use std::mem::MaybeUninit;
-use std::slice;
+use std::{io, mem, slice};
 
 #[derive(Clone)]
 pub(crate) struct DString {
@@ -9,6 +10,30 @@ pub(crate) struct DString {
     str_len: usize,
     // Don't trust val.len(), use str_len * char_size for actual contents
     val: Vec<MaybeUninit<u8>>,
+}
+
+impl Write for DString {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.len() % self.char_size != 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "write must be multiples of char_size"))
+        }
+
+        self.val.resize(
+            (self.str_len + buf.len()) * self.char_size,
+            MaybeUninit::uninit(),
+        );
+
+        let start_pos = self.char_size * self.str_len;
+
+        let dst_ptr = &mut self.val[start_pos..(start_pos+buf.len())];
+        dst_ptr.copy_from_slice(unsafe { mem::transmute(buf) });
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[must_use]
@@ -48,6 +73,7 @@ pub(crate) extern "C" fn dstring_get_val_rw(ds: *mut DString) -> *mut libc::c_vo
 pub(crate) extern "C" fn dstring_clear(ds: *mut DString) {
     unsafe {
         (*ds).str_len = 0;
+        (*ds).val.clear();
     }
 }
 
@@ -56,14 +82,7 @@ pub(crate) extern "C" fn dstring_clear(ds: *mut DString) {
 pub(crate) extern "C" fn dstring_copy(dst: *mut DString, src: *const DString) -> Bool {
     let dst = unsafe { &mut *dst };
     let src = unsafe { &*src };
-
-    // Unlike clone() this should not reallocate if not necessary
-    dst.val.resize(src.val.len(), MaybeUninit::uninit());
-    dst.val.copy_from_slice(&src.val);
-
-    dst.char_size = src.char_size;
-    dst.str_len = src.str_len;
-
+    src.clone_into(dst);
     TRUE
 }
 
@@ -81,15 +100,12 @@ pub(crate) extern "C" fn dstring_append(dst: *mut DString, src: *const DString) 
         MaybeUninit::uninit(),
     );
 
-    for (dchr, schr) in dst
-        .val
-        .iter_mut()
-        .skip(dst.char_size * dst.str_len)
-        .take((src.str_len + 1) * dst.char_size)
-        .zip(&src.val)
-    {
-        *dchr = *schr;
-    }
+    let start_pos = dst.char_size * dst.str_len;
+    let copy_len = (src.str_len+1) * dst.char_size;
+
+    let dst_ptr = &mut dst.val[start_pos..(start_pos+copy_len)];
+    dst_ptr.copy_from_slice(&src.val[..copy_len]);
+
     dst.str_len += src.str_len;
     TRUE
 }
@@ -101,22 +117,20 @@ pub(crate) extern "C" fn dstring_append_string(
     len: i32,
 ) -> Bool {
     let ds = unsafe { &mut *ds };
-    let data = unsafe { slice::from_raw_parts(data.cast(), ds.char_size * len as usize) };
+    let copy_len = ds.char_size * len as usize;
+    let data = unsafe { slice::from_raw_parts(data.cast(), copy_len) };
 
     ds.val.resize(
         (ds.str_len + len as usize + 1) * ds.char_size,
         MaybeUninit::uninit(),
     );
 
-    for (dchr, schr) in ds
-        .val
-        .iter_mut()
-        .skip(ds.char_size * ds.str_len)
-        .take(ds.char_size * len as usize)
-        .zip(data)
-    {
-        *dchr = *schr;
-    }
+    let start_pos = ds.char_size * ds.str_len;
+
+    let dst_ptr = &mut ds.val[start_pos..(start_pos+copy_len)];
+    debug_assert_eq!(dst_ptr.len(), copy_len);
+    dst_ptr.copy_from_slice(data);
+
     ds.str_len += len as usize;
     TRUE
 }
@@ -129,15 +143,13 @@ pub(crate) extern "C" fn dstring_append_char(ds: *mut DString, data: *const libc
     ds.val
         .resize((ds.str_len + 2) * ds.char_size, MaybeUninit::uninit());
 
-    for (dst, src) in ds
-        .val
-        .iter_mut()
-        .skip(ds.char_size * ds.str_len)
-        .take(ds.char_size)
-        .zip(data)
-    {
-        *dst = *src;
-    }
+    let start_pos = ds.char_size * ds.str_len;
+    let copy_len = ds.char_size;
+
+    let dst_ptr = &mut ds.val[start_pos..(start_pos+copy_len)];
+    debug_assert_eq!(dst_ptr.len(), copy_len);
+    dst_ptr.copy_from_slice(data);
+
     ds.str_len += 1;
 
     TRUE
