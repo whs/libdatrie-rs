@@ -45,6 +45,30 @@ pub struct Trie {
     is_dirty: Bool,
 }
 
+impl Trie {
+    /// Create a new empty trie object based on the given `alpha_map` alphabet
+    /// set. The trie contents can then be added and deleted with trie.store() and
+    /// trie.delete() respectively.
+    pub fn new(alpha_map: &AlphaMap) -> Self {
+        Self {
+            alpha_map: Box::into_raw(Box::new(alpha_map.clone())),
+            da: Box::into_raw(Box::new(DArray::default())),
+            tail: Box::into_raw(Box::new(Tail::default())),
+            is_dirty: TRUE,
+        }
+    }
+}
+
+impl Drop for Trie {
+    fn drop(&mut self) {
+        unsafe {
+            drop(Box::from_raw(self.alpha_map));
+            drop(Box::from_raw(self.da));
+            drop(Box::from_raw(self.tail));
+        }
+    }
+}
+
 pub type TrieEnumFunc =
     Option<unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool>;
 
@@ -66,31 +90,14 @@ pub struct TrieIterator {
 
 pub const NULL: libc::c_int = 0 as libc::c_int;
 
+#[deprecated(note="Use Trie::new()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_new(mut alpha_map: *const AlphaMap) -> *mut Trie {
+pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
     println!("trie_new: Rust!");
-    let mut trie: *mut Trie = 0 as *mut Trie;
-    trie = malloc(::core::mem::size_of::<Trie>() as libc::c_ulong) as *mut Trie;
-    if trie.is_null() {
-        return NULL as *mut Trie;
-    }
-    (*trie).alpha_map = alpha_map_clone(alpha_map);
-    if !((*trie).alpha_map).is_null() {
-        (*trie).da = da_new();
-        if !((*trie).da).is_null() {
-            (*trie).tail = tail_new();
-            if ((*trie).tail).is_null() {
-                da_free(NonNull::new_unchecked((*trie).da));
-            } else {
-                (*trie).is_dirty = TRUE as Bool;
-                return trie;
-            }
-        }
-        alpha_map_free(NonNull::new_unchecked((*trie).alpha_map));
-    }
-    free(trie as *mut libc::c_void);
-    return NULL as *mut Trie;
+    let trie = Trie::new(unsafe { &* alpha_map});
+    Box::into_raw(Box::new(trie))
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_new_from_file(mut path: *const libc::c_char) -> *mut Trie {
     println!("trie_new_from_file: Rust!");
@@ -104,6 +111,7 @@ pub unsafe extern "C" fn trie_new_from_file(mut path: *const libc::c_char) -> *m
     fclose(trie_file);
     return trie;
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_fread(mut file: NonNull<libc::FILE>) -> *mut Trie {
     let trie = malloc(size_of::<Trie>() as libc::c_ulong) as *mut Trie;
@@ -132,13 +140,12 @@ pub unsafe extern "C" fn trie_fread(mut file: NonNull<libc::FILE>) -> *mut Trie 
     free(trie as *mut libc::c_void);
     return NULL as *mut Trie;
 }
+
 #[no_mangle]
-pub unsafe extern "C" fn trie_free(mut trie: *mut Trie) {
-    alpha_map_free(NonNull::new_unchecked((*trie).alpha_map));
-    da_free(NonNull::new_unchecked((*trie).da));
-    tail_free(NonNull::new_unchecked((*trie).tail));
-    free(trie as *mut libc::c_void);
+pub unsafe extern "C" fn trie_free(trie: *mut Trie) {
+    drop(Box::from_raw(trie))
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_save(
     mut trie: *mut Trie,
