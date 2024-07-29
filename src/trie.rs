@@ -57,6 +57,22 @@ impl Trie {
             is_dirty: TRUE,
         }
     }
+
+    /// Returns size that would be occupied by a trie if it was
+    /// serialized into a binary blob or file.
+    pub fn serialized_size(&self) -> usize {
+        let am = unsafe { &*self.alpha_map };
+        let da = unsafe { &*self.da };
+        let tail = unsafe { &*self.tail };
+
+        am.serialized_size() + da.serialized_size() + tail.serialized_size()
+    }
+
+    /// Check if the trie is dirty with some pending changes and needs saving
+    /// to keep the file synchronized.
+    pub fn is_dirty(&self) -> bool {
+        self.is_dirty.into()
+    }
 }
 
 impl Drop for Trie {
@@ -90,11 +106,11 @@ pub struct TrieIterator {
 
 pub const NULL: libc::c_int = 0 as libc::c_int;
 
-#[deprecated(note="Use Trie::new()")]
+#[deprecated(note = "Use Trie::new()")]
 #[no_mangle]
 pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
     println!("trie_new: Rust!");
-    let trie = Trie::new(unsafe { &* alpha_map});
+    let trie = Trie::new(unsafe { &*alpha_map });
     Box::into_raw(Box::new(trie))
 }
 
@@ -161,12 +177,14 @@ pub unsafe extern "C" fn trie_save(
     fclose(file);
     return res;
 }
+
+#[deprecated(note = "Use trie.serialized_size()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_get_serialized_size(mut trie: *mut Trie) -> usize {
-    return (alpha_map_get_serialized_size((*trie).alpha_map))
-        .wrapping_add(da_get_serialized_size((*trie).da))
-        .wrapping_add(tail_get_serialized_size((*trie).tail));
+pub unsafe extern "C" fn trie_get_serialized_size(trie: *const Trie) -> usize {
+    let trie = unsafe { &*trie };
+    trie.serialized_size()
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_serialize(mut trie: *mut Trie, mut ptr: *mut u8) {
     let mut ptr1: *mut uint8 = ptr;
@@ -175,6 +193,7 @@ pub unsafe extern "C" fn trie_serialize(mut trie: *mut Trie, mut ptr: *mut u8) {
     tail_serialize((*trie).tail, mem::transmute(&mut ptr1));
     (*trie).is_dirty = FALSE as Bool;
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_fwrite(mut trie: *mut Trie, mut file: NonNull<FILE>) -> libc::c_int {
     if alpha_map_fwrite_bin((*trie).alpha_map, file) != 0 as libc::c_int {
@@ -189,10 +208,14 @@ pub unsafe extern "C" fn trie_fwrite(mut trie: *mut Trie, mut file: NonNull<FILE
     (*trie).is_dirty = FALSE as Bool;
     return 0 as libc::c_int;
 }
+
+#[deprecated(note = "Use trie.is_dirty()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_is_dirty(mut trie: *const Trie) -> Bool {
-    return (*trie).is_dirty;
+pub extern "C" fn trie_is_dirty(trie: *const Trie) -> Bool {
+    let trie = unsafe { &*trie };
+    trie.is_dirty().into()
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_retrieve(
     mut trie: *const Trie,
