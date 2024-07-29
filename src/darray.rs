@@ -7,9 +7,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
-use crate::trie_string::{
-    trie_string_append_char, trie_string_cut_last, TrieChar, TrieString, TRIE_CHAR_MAX,
-};
+use crate::trie_string::{TrieChar, TrieString, TRIE_CHAR_MAX};
 use crate::types::*;
 
 #[derive(Default, Clone)]
@@ -371,37 +369,39 @@ impl DArray {
     /// Find the next separate node under a sub-trie rooted at `root` starting
     /// from the current separate node `sep`.
     ///
-    /// Return offset of `keybuff` from the key which walks
-    /// to previous separate node to the one which walks to the new separate node
+    /// On return, `keybuff` is incrementally updated from the key which walks
+    ///  to previous separate node to the one which walks to the new separate node.
     /// So, it is assumed to be initialized by at least one first_separate()
     /// call before. This incremental key calculation is more efficient than later
     /// totally reconstructing key from the given separate node.
-    pub(crate) fn da_next_separate(
+    pub(crate) fn next_separate(
         &mut self,
         root: TrieIndex,
         sep: TrieIndex,
-        keybuff: &TrieString,
-    ) -> Option<(TrieIndex)> {
-        todo!()
-        // let mut sep = sep;
-        // while sep != root {
-        //     let parent = self.get_check(sep).unwrap();
-        //     let base = self.get_base(parent).unwrap();
-        //     let c = sep - base;
-        //     trie_string_cut_last(keybuff);
-        //     let max_c = cmp::min(
-        //         TRIE_CHAR_MAX as TrieIndex,
-        //         self.cells.len() as TrieIndex - base,
-        //     );
-        //     for c in (c+1)..=max_c {
-        //         if self.get_check(base + c) == Some(parent) {
-        //             trie_string_append_char(keybuff, c as TrieChar);
-        //             return da_first_separate(d, base + c, keybuff);
-        //         }
-        //     }
-        //     sep = parent;
-        // }
-        // None
+        keybuff: &mut TrieString,
+    ) -> Option<TrieIndex> {
+        let mut sep = sep;
+        while sep != root {
+            let parent = self.get_check(sep).unwrap();
+            let base = self.get_base(parent).unwrap();
+            let c = sep - base;
+
+            keybuff.pop();
+
+            // find next sibling of sep
+            let max_c = cmp::min(
+                TRIE_CHAR_MAX as TrieIndex,
+                self.cells.len() as TrieIndex - base,
+            );
+            for c in (c + 1)..=max_c {
+                if self.get_check(base + c) == Some(parent) {
+                    keybuff.append(c as TrieChar);
+                    return self.first_separate(base + c, keybuff);
+                }
+            }
+            sep = parent;
+        }
+        None
     }
 
     pub(crate) fn serialized_size(&self) -> usize {
@@ -592,46 +592,10 @@ pub(crate) extern "C" fn da_insert_branch(
     da.insert_branch(s, c).unwrap_or(TRIE_INDEX_ERROR)
 }
 
-#[deprecated(note = "Use d.check_free_cell()")]
-fn da_check_free_cell(mut d: NonNull<DArray>, s: TrieIndex) -> Bool {
-    let da = unsafe { d.as_mut() };
-    da.check_free_cell(s).into()
-}
-
-#[deprecated(note = "Use d.has_children()")]
-unsafe fn da_has_children(d: *const DArray, s: TrieIndex) -> Bool {
-    let da = unsafe { &*d };
-    da.has_children(s).into()
-}
-
 #[deprecated(note = "Use d.output_symbols()")]
 pub(crate) unsafe fn da_output_symbols(d: *const DArray, s: TrieIndex) -> Symbols {
     let da = unsafe { &*d };
     da.output_symbols(s)
-}
-
-#[deprecated(note = "Use d.find_free_base().unwrap_or(TRIE_INDEX_ERROR)")]
-fn da_find_free_base(mut d: NonNull<DArray>, symbols: &Symbols) -> TrieIndex {
-    let da = unsafe { d.as_mut() };
-    da.find_free_base(symbols).unwrap_or(TRIE_INDEX_ERROR)
-}
-
-#[deprecated(note = "Use d.fit_symbols()")]
-unsafe fn da_fit_symbols(mut d: NonNull<DArray>, base: TrieIndex, symbols: &Symbols) -> Bool {
-    let da = unsafe { d.as_mut() };
-    da.fit_symbols(base, symbols).into()
-}
-
-#[deprecated(note = "Use d.relocate_base()")]
-unsafe fn da_relocate_base(mut d: NonNull<DArray>, s: TrieIndex, new_base: TrieIndex) {
-    let da = unsafe { d.as_mut() };
-    da.relocate_base(s, new_base)
-}
-
-#[deprecated(note = "Use da.extend_pool()")]
-fn da_extend_pool(mut d: NonNull<DArray>, to_index: TrieIndex) -> Bool {
-    let da = unsafe { d.as_mut() };
-    da.extend_pool(to_index).into()
 }
 
 #[deprecated(note = "Use d.prune()")]
@@ -648,21 +612,9 @@ pub(crate) unsafe extern "C" fn da_prune_upto(mut d: NonNull<DArray>, p: TrieInd
     da.prune_upto(p, s)
 }
 
-#[deprecated(note = "Use d.alloc_cell()")]
-fn da_alloc_cell(mut d: NonNull<DArray>, cell: TrieIndex) {
-    let da = unsafe { d.as_mut() };
-    da.alloc_cell(cell)
-}
-
-#[deprecated(note = "Use d.free_cell()")]
-fn da_free_cell(mut d: NonNull<DArray>, cell: TrieIndex) {
-    let da = unsafe { d.as_mut() };
-    da.free_cell(cell)
-}
-
 #[deprecated(note = "Use d.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
 #[no_mangle]
-pub extern "C" fn da_first_separate(
+pub(crate) extern "C" fn da_first_separate(
     mut d: NonNull<DArray>,
     root: TrieIndex,
     mut keybuff: NonNull<TrieString>,
@@ -672,40 +624,16 @@ pub extern "C" fn da_first_separate(
     da.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR)
 }
 
+#[deprecated(note = "Use d.next_separate(root, sep, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
 #[no_mangle]
-pub unsafe extern "C" fn da_next_separate(
+pub(crate) unsafe extern "C" fn da_next_separate(
     mut d: NonNull<DArray>,
     root: TrieIndex,
-    mut sep: TrieIndex,
+    sep: TrieIndex,
     mut keybuff: NonNull<TrieString>,
 ) -> TrieIndex {
     let da = unsafe { d.as_mut() };
-    let keybuff = unsafe { keybuff.as_mut()};
-    // TODO: Port
-    let mut parent: TrieIndex = 0;
-    let mut base: TrieIndex = 0;
-    let mut c: TrieIndex = 0;
-    let mut max_c: TrieIndex = 0;
-    while sep != root {
-        parent = da.get_check(sep).unwrap_or(TRIE_INDEX_ERROR);
-        base = da.get_base(parent).unwrap_or(TRIE_INDEX_ERROR);
-        c = sep - base;
-        trie_string_cut_last(NonNull::new_unchecked(keybuff));
-        max_c = cmp::min(
-            TRIE_CHAR_MAX as TrieIndex,
-            da.cells.len() as TrieIndex - base,
-        );
-        loop {
-            c += 1;
-            if !(c <= max_c) {
-                break;
-            }
-            if da.get_check(base + c) == Some(parent) {
-                trie_string_append_char(NonNull::new_unchecked(keybuff), c as TrieChar);
-                return da.first_separate(base + c, keybuff).unwrap_or(TRIE_INDEX_ERROR);
-            }
-        }
-        sep = parent;
-    }
-    return TRIE_INDEX_ERROR;
+    let keybuff = unsafe { keybuff.as_mut() };
+    da.next_separate(root, sep, keybuff)
+        .unwrap_or(TRIE_INDEX_ERROR)
 }

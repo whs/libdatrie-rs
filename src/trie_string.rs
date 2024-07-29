@@ -49,7 +49,7 @@ pub extern "C" fn trie_char_strdup(str: *const TrieChar) -> *mut TrieChar {
 #[derive(Clone, Default, Debug)]
 pub(crate) struct TrieString {
     inner: Vec<TrieChar>,
-    str_len: usize
+    str_len: usize,
 }
 
 impl TrieString {
@@ -200,7 +200,7 @@ pub extern "C" fn trie_string_append_string(
     TRUE
 }
 
-#[deprecated(note="Use ts.append()")]
+#[deprecated(note = "Use ts.append()")]
 #[no_mangle]
 pub extern "C" fn trie_string_append_char(mut ts: NonNull<TrieString>, tc: TrieChar) -> Bool {
     let ts = unsafe { ts.as_mut() };
@@ -208,7 +208,7 @@ pub extern "C" fn trie_string_append_char(mut ts: NonNull<TrieString>, tc: TrieC
     TRUE
 }
 
-#[deprecated(note="Use ts.ensure_terminated()")]
+#[deprecated(note = "Use ts.ensure_terminated()")]
 #[no_mangle]
 pub extern "C" fn trie_string_terminate(mut ts: NonNull<TrieString>) -> Bool {
     let ts = unsafe { ts.as_mut() };
@@ -216,7 +216,7 @@ pub extern "C" fn trie_string_terminate(mut ts: NonNull<TrieString>) -> Bool {
     TRUE
 }
 
-#[deprecated(note="Use ts.pop()")]
+#[deprecated(note = "Use ts.pop()")]
 #[no_mangle]
 pub extern "C" fn trie_string_cut_last(mut ts: NonNull<TrieString>) -> Bool {
     let ts = unsafe { ts.as_mut() };
