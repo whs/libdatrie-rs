@@ -20,16 +20,6 @@ const TAIL_SIGNATURE: u32 = 0xdffcdffc;
 const TAIL_START_BLOCKNO: TrieIndex = 1;
 
 impl Tail {
-    #[deprecated(note = "Use self.tails")]
-    fn blocks(&self) -> &[TailBlock] {
-        &self.tails
-    }
-
-    #[deprecated(note = "Use self.tails")]
-    fn blocks_mut(&mut self) -> &mut [TailBlock] {
-        &mut self.tails
-    }
-
     pub(crate) fn get_suffix(&self, index: usize) -> Option<&[TrieChar]> {
         let index = index - TAIL_START_BLOCKNO as usize;
         match self.tails.get(index).map(|v| &v.suffix) {
@@ -244,14 +234,14 @@ impl Tail {
         // This could potentially just be size_of::<TailBlock> but
         // to ensure compatibility with original code
         // we explicitly type out each fields' expected types
-        const size_of_block: usize = size_of::<TrieIndex>() // next_free
+        const SIZE_OF_BLOCK: usize = size_of::<TrieIndex>() // next_free
             + size_of::<TrieData>() // data
             + size_of::<i16>(); // length
 
         size_of::<i32>() // TAIL_SIGNATURE
             + size_of::<TrieIndex>() // first_free
             + size_of::<TrieIndex>() // num_tails
-            + (size_of_block * self.tails.len() as usize)
+            + (SIZE_OF_BLOCK * self.tails.len() as usize)
             + self.tails.iter().map(|block| {
             block.suffix.as_ref().map(|suffix| suffix.len() - 1).unwrap_or(0)
         }).sum::<usize>()

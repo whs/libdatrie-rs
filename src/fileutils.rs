@@ -31,10 +31,6 @@ pub(crate) extern "C" fn file_read_int32(file: *mut libc::FILE, o_val: *mut i32)
     }
 }
 
-fn serialize_int32_be(buff: &mut [u8], val: i32) {
-    BigEndian::write_i32(buff, val)
-}
-
 #[no_mangle]
 pub(crate) unsafe extern "C" fn serialize_int32_be_incr(buff: *mut *mut u8, val: i32) {
     let write_buf: *mut [u8] = *buff.cast();
@@ -62,10 +58,6 @@ pub(crate) extern "C" fn file_read_int16(file: *mut libc::FILE, o_val: *mut i16)
         },
         Err(_) => FALSE,
     }
-}
-
-fn serialize_int16_be(buff: &mut [u8], val: i16) {
-    BigEndian::write_i16(buff, val)
 }
 
 #[no_mangle]
