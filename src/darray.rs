@@ -180,8 +180,8 @@ impl DArray {
     }
 
     fn extend_pool(&mut self, to_index: TrieIndex) -> bool {
-        // Rust: minimum index is now DA_POOL_BEGIN+1 instead of 0
-        if to_index <= DA_POOL_BEGIN || to_index >= TRIE_INDEX_MAX {
+        // Rust: minimum index is now DA_POOL_BEGIN instead of 0
+        if to_index < DA_POOL_BEGIN || to_index >= TRIE_INDEX_MAX {
             return false;
         }
         if (to_index as usize) < self.cells.len() {
