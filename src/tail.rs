@@ -334,11 +334,12 @@ pub(crate) extern "C" fn tail_get_serialized_size(t: *const Tail) -> usize {
 #[no_mangle]
 pub(crate) unsafe extern "C" fn tail_serialize(
     t: *const Tail,
-    mut ptr: NonNull<NonNull<[u8]>>,
+    mut ptr: NonNull<NonNull<u8>>,
 ) -> i32 {
-    // FIXME: [u8] type is not actually stable ABI
-    let mut cursor = Cursor::new(ptr.as_mut().as_mut());
-    (*t).serialize(&mut cursor).unwrap();
+    let tail = &*t;
+    let write_area = slice::from_raw_parts_mut(ptr.as_mut().as_ptr(), tail.serialized_size());
+    let mut cursor = Cursor::new(write_area);
+    tail.serialize(&mut cursor).unwrap();
     // Move ptr
     ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 

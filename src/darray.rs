@@ -1,6 +1,6 @@
+use std::{cmp, io, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
-use std::{cmp, io, ptr};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -8,7 +8,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
 use crate::trie_string::{
-    trie_string_append_char, trie_string_cut_last, TrieChar, TrieString, TRIE_CHAR_MAX,
+    TRIE_CHAR_MAX, trie_string_append_char, trie_string_cut_last, TrieChar, TrieString,
 };
 use crate::types::*;
 
@@ -305,7 +305,7 @@ impl DArray {
         self.set_base(i, -cell);
     }
 
-    pub(crate) fn get_serialized_size(&self) -> usize {
+    pub(crate) fn serialized_size(&self) -> usize {
         if !self.cells.is_empty() {
             4 * self.cells.len() * 2 // `base` and `check`
         } else {
@@ -421,15 +421,16 @@ pub(crate) extern "C" fn da_fwrite(d: *const DArray, file: NonNull<libc::FILE>) 
 #[no_mangle]
 pub(crate) extern "C" fn da_get_serialized_size(d: *const DArray) -> usize {
     let da = unsafe { &*d };
-    da.get_serialized_size()
+    da.serialized_size()
 }
 
 #[deprecated(note = "Use DArray::serialize()")]
 #[no_mangle]
-pub(crate) unsafe extern "C" fn da_serialize(d: *const DArray, mut ptr: NonNull<NonNull<[u8]>>) {
-    // FIXME: [u8] type is not actually stable ABI
-    let mut cursor = Cursor::new(ptr.as_mut().as_mut());
-    (*d).serialize(&mut cursor).unwrap();
+pub(crate) unsafe extern "C" fn da_serialize(d: *const DArray, mut ptr: NonNull<NonNull<u8>>) {
+    let da = &*d;
+    let write_area = slice::from_raw_parts_mut(ptr.as_mut().as_ptr(), da.serialized_size());
+    let mut cursor = Cursor::new(write_area);
+    da.serialize(&mut cursor).unwrap();
     // Move ptr
     ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 }

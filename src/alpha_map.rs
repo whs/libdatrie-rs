@@ -216,11 +216,12 @@ pub(crate) extern "C" fn alpha_map_get_serialized_size(alpha_map: *const AlphaMa
 #[no_mangle]
 pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(
     alpha_map: *const AlphaMap,
-    mut ptr: NonNull<NonNull<[u8]>>,
+    mut ptr: NonNull<NonNull<u8>>,
 ) {
-    // FIXME: [u8] type is not actually stable
-    let mut cursor = Cursor::new(ptr.as_mut().as_mut());
-    (*alpha_map).serialize(&mut cursor).unwrap();
+    let am = &*alpha_map;
+    let write_area = slice::from_raw_parts_mut(ptr.as_mut().as_ptr(), am.serialized_size());
+    let mut cursor = Cursor::new(write_area);
+    am.serialize(&mut cursor).unwrap();
     // Move ptr
     ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 }
