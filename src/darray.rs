@@ -1,6 +1,6 @@
-use std::{cmp, io, ptr, slice};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ptr::NonNull;
+use std::{cmp, io, ptr, slice};
 
 use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -8,7 +8,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
 use crate::trie_string::{
-    TRIE_CHAR_MAX, trie_string_append_char, trie_string_cut_last, TrieChar, TrieString,
+    trie_string_append_char, trie_string_cut_last, TrieChar, TrieString, TRIE_CHAR_MAX,
 };
 use crate::types::*;
 
@@ -91,7 +91,7 @@ impl DArray {
     /// represented by index `s`
     /// Note that it assumes that no such arc exists before inserting.
     pub(crate) fn insert_branch(&mut self, s: TrieIndex, c: TrieChar) -> Option<TrieIndex> {
-        let base = self.get_base(s).unwrap_or(0);
+        let base = self.get_base(s).unwrap();
 
         let mut next;
         if base > 0 {
@@ -110,9 +110,7 @@ impl DArray {
                 symbols.add(c);
                 let new_base = self.find_free_base(&symbols)?;
 
-                unsafe {
-                    da_relocate_base(self.into(), s, new_base);
-                }
+                self.relocate_base(s, new_base);
                 next = new_base + c as TrieIndex;
             }
         } else {
@@ -159,7 +157,7 @@ impl DArray {
 
     pub(crate) fn output_symbols(&self, s: TrieIndex) -> Symbols {
         let mut syms = Symbols::default();
-        let base = self.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
+        let base = self.get_base(s).unwrap();
         let max_c = cmp::min(
             TrieChar::MAX as TrieIndex,
             self.cells.len() as TrieIndex - base,
@@ -218,6 +216,44 @@ impl DArray {
             }
         }
         true
+    }
+
+    fn relocate_base(&mut self, s: TrieIndex, new_base: TrieIndex) {
+        let old_base = self.get_base(s).unwrap(); // was unwrap_or(TRIE_INDEX_ERROR)
+        let symbols = self.output_symbols(s);
+
+        for sym in symbols.iter().copied() {
+            let old_next = old_base + sym as TrieIndex;
+            let new_next = new_base + sym as TrieIndex;
+            let old_next_base = self.get_base(old_next).unwrap(); // was unwrap_or
+
+            // allocate new next node and copy BASE value
+            self.alloc_cell(new_next);
+            self.set_check(new_next, s);
+            self.set_base(new_next, old_next_base);
+
+            // old_next node is now moved to new_next
+            // so, all cells belonging to old_next
+            // must be given to new_next
+            // preventing the case of TAIL pointer
+            if old_next_base > 0 {
+                let max_c = cmp::min(
+                    TRIE_CHAR_MAX as TrieIndex,
+                    self.cells.len() as TrieIndex - old_next_base,
+                );
+                for c in 0..=max_c {
+                    if self.get_check(old_next_base + c) == Some(old_next) {
+                        self.set_check(old_next_base + c, new_next);
+                    }
+                }
+            }
+
+            // free old_next node
+            self.free_cell(old_next);
+        }
+
+        // finally, make BASE[s] point to new_base
+        self.set_base(s, new_base);
     }
 
     fn extend_pool(&mut self, to_index: TrieIndex) -> bool {
@@ -523,43 +559,10 @@ unsafe fn da_fit_symbols(mut d: NonNull<DArray>, base: TrieIndex, symbols: &Symb
     da.fit_symbols(base, symbols).into()
 }
 
+#[deprecated(note = "Use d.relocate_base()")]
 unsafe fn da_relocate_base(mut d: NonNull<DArray>, s: TrieIndex, new_base: TrieIndex) {
-    // TODO: Port
     let da = unsafe { d.as_mut() };
-    let mut old_base: TrieIndex = 0;
-    let mut i: libc::c_int = 0;
-    old_base = da.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
-    let symbols = da.output_symbols(s);
-    i = 0 as libc::c_int;
-    while i < symbols.num() as i32 {
-        let mut old_next: TrieIndex = 0;
-        let mut new_next: TrieIndex = 0;
-        let mut old_next_base: TrieIndex = 0;
-        old_next = old_base + symbols.get(i as usize).unwrap() as libc::c_int;
-        new_next = new_base + symbols.get(i as usize).unwrap() as libc::c_int;
-        old_next_base = da.get_base(old_next).unwrap_or(TRIE_INDEX_ERROR);
-        da.alloc_cell(new_next);
-        da.set_check(new_next, s);
-        da.set_base(new_next, old_next_base);
-        if old_next_base > 0 as libc::c_int {
-            let mut c: TrieIndex = 0;
-            let mut max_c: TrieIndex = 0;
-            max_c = cmp::min(
-                TRIE_CHAR_MAX as TrieIndex,
-                da.cells.len() as TrieIndex - old_next_base,
-            );
-            c = 0 as libc::c_int;
-            while c <= max_c {
-                if da.get_check(old_next_base + c) == Some(old_next) {
-                    da.set_check(old_next_base + c, new_next);
-                }
-                c += 1;
-            }
-        }
-        da.free_cell(old_next);
-        i += 1;
-    }
-    da.set_base(s, new_base);
+    da.relocate_base(s, new_base)
 }
 
 #[deprecated(note = "Use da.extend_pool()")]
