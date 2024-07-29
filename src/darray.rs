@@ -87,6 +87,47 @@ impl DArray {
         None
     }
 
+    /// Insert a new arc labelled with character `c` from the trie node
+    /// represented by index `s`
+    /// Note that it assumes that no such arc exists before inserting.
+    pub(crate) fn insert_branch(&mut self, s: TrieIndex, c: TrieChar) -> Option<TrieIndex> {
+        let base = self.get_base(s).unwrap_or(0);
+
+        let mut next;
+        if base > 0 {
+            next = base + c as TrieIndex;
+
+            // if already there, do not actually insert
+            if self.get_check(next) == Some(s) {
+                return Some(next);
+            }
+
+            // if (base + c) > TRIE_INDEX_MAX which means 'next' is overflow,
+            // or cell [next] is not free, relocate to a free slot
+            if base > TRIE_INDEX_MAX - c as TrieIndex || !self.check_free_cell(next) {
+                // relocate BASE[s]
+                let mut symbols = self.output_symbols(s);
+                symbols.add(c);
+                let new_base = self.find_free_base(&symbols)?;
+
+                unsafe {
+                    da_relocate_base(self.into(), s, new_base);
+                }
+                next = new_base + c as TrieIndex;
+            }
+        } else {
+            let mut symbols = Symbols::default();
+            symbols.add(c);
+            let new_base = self.find_free_base(&symbols)?;
+
+            self.set_base(s, new_base);
+            next = new_base + c as TrieIndex;
+        }
+        self.alloc_cell(next);
+        self.set_check(next, s);
+        Some(next)
+    }
+
     fn check_free_cell(&mut self, s: TrieIndex) -> bool {
         if !self.extend_pool(s) {
             return false;
@@ -131,7 +172,7 @@ impl DArray {
         syms
     }
 
-    fn find_free_base(&mut self, symbols: &Symbols) -> TrieIndex {
+    fn find_free_base(&mut self, symbols: &Symbols) -> Option<TrieIndex> {
         // find first free cell that is beyond the first symbol
         let first_sym = symbols.get(0).unwrap();
         let mut s = -self.get_check(self.get_free_list()).unwrap();
@@ -142,7 +183,7 @@ impl DArray {
             s = first_sym as TrieIndex + DA_POOL_BEGIN;
             loop {
                 if !self.extend_pool(s) {
-                    return TRIE_INDEX_ERROR;
+                    return None;
                 }
                 if self.get_check(s).unwrap() < 0 {
                     break;
@@ -157,13 +198,13 @@ impl DArray {
             if -self.get_check(s).unwrap() == self.get_free_list() {
                 if !self.extend_pool(self.cells.len() as TrieIndex) {
                     // unlikely
-                    return TRIE_INDEX_ERROR;
+                    return None;
                 }
             }
             s = -self.get_check(s).unwrap();
         }
 
-        s - first_sym as TrieIndex
+        Some(s - first_sym as TrieIndex)
     }
 
     fn fit_symbols(&mut self, base: TrieIndex, symbols: &Symbols) -> bool {
@@ -422,14 +463,14 @@ pub(crate) extern "C" fn da_set_base(mut d: NonNull<DArray>, s: TrieIndex, val: 
 
 #[deprecated(note = "Use d.set_check() and ignore error")]
 #[no_mangle]
-pub unsafe extern "C" fn da_set_check(mut d: NonNull<DArray>, s: TrieIndex, val: TrieIndex) {
+pub(crate) unsafe extern "C" fn da_set_check(mut d: NonNull<DArray>, s: TrieIndex, val: TrieIndex) {
     let da = unsafe { d.as_mut() };
     let _ = da.set_check(s, val);
 }
 
 #[deprecated(note = "Use Some(*s) = d.walk(s, c)")]
 #[no_mangle]
-pub unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool {
+pub(crate) unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool {
     let da = unsafe { &*d };
     if let Some(new_s) = da.walk(unsafe { *s }, c) {
         unsafe {
@@ -440,47 +481,15 @@ pub unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieCha
     FALSE
 }
 
+#[deprecated(note = "Use d.insert_branch(s, c).unwrap_or(TRIE_INDEX_ERROR)")]
 #[no_mangle]
-pub unsafe extern "C" fn da_insert_branch(
+pub(crate) extern "C" fn da_insert_branch(
     mut d: NonNull<DArray>,
     s: TrieIndex,
     c: TrieChar,
 ) -> TrieIndex {
-    // TODO: Port
     let da = unsafe { d.as_mut() };
-    let mut next: TrieIndex = 0;
-    let base = da.get_base(s).unwrap_or(TRIE_INDEX_ERROR);
-    if base > TRIE_INDEX_ERROR {
-        next = base + c as libc::c_int;
-        if da.get_check(next) == Some(s) {
-            return next;
-        }
-        if base > TRIE_INDEX_MAX - c as libc::c_int || !da.check_free_cell(next) {
-            let mut symbols = Symbols::default();
-            let mut new_base: TrieIndex = 0;
-            symbols = da.output_symbols(s);
-            symbols.add(c);
-            new_base = da.find_free_base(&symbols);
-            if 0 as libc::c_int == new_base {
-                return TRIE_INDEX_ERROR;
-            }
-            da_relocate_base(d, s, new_base);
-            next = new_base + c as libc::c_int;
-        }
-    } else {
-        let mut new_base_0: TrieIndex = 0;
-        let mut symbols_0 = Symbols::default();
-        symbols_0.add(c);
-        new_base_0 = da.find_free_base(&symbols_0);
-        if 0 as libc::c_int == new_base_0 {
-            return TRIE_INDEX_ERROR;
-        }
-        da.set_base(s, new_base_0);
-        next = new_base_0 + c as libc::c_int;
-    }
-    da.alloc_cell(next);
-    da.set_check(next, s);
-    return next;
+    da.insert_branch(s, c).unwrap_or(TRIE_INDEX_ERROR)
 }
 
 #[deprecated(note = "Use d.check_free_cell()")]
@@ -501,10 +510,10 @@ pub(crate) unsafe fn da_output_symbols(d: *const DArray, s: TrieIndex) -> Symbol
     da.output_symbols(s)
 }
 
-#[deprecated(note = "Use d.find_free_base()")]
+#[deprecated(note = "Use d.find_free_base().unwrap_or(TRIE_INDEX_ERROR)")]
 fn da_find_free_base(mut d: NonNull<DArray>, symbols: &Symbols) -> TrieIndex {
     let da = unsafe { d.as_mut() };
-    da.find_free_base(symbols)
+    da.find_free_base(symbols).unwrap_or(TRIE_INDEX_ERROR)
 }
 
 #[deprecated(note = "Use d.fit_symbols()")]
