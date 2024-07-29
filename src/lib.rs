@@ -8,7 +8,6 @@
 
 pub mod alpha_map;
 mod darray;
-mod dstring;
 mod fileutils;
 mod symbols;
 mod tail;

@@ -341,6 +341,69 @@ impl DArray {
         self.set_base(i, -cell);
     }
 
+    /// Find the first separate node under a sub-trie rooted at `root` and write to `keybuff`
+    ///
+    /// On return, `keybuff` is appended with the key characters which walk from
+    /// `root` to the separate node. This is for incrementally calculating the
+    /// transition key, which is more efficient than later totally reconstructing
+    /// key from the given separate node.
+    pub(crate) extern "C" fn first_separate<T: Write>(
+        &mut self,
+        root: TrieIndex,
+        keybuff: &mut T,
+    ) -> Option<TrieIndex> {
+        let mut root = root;
+        while let Some(base) = self.get_base(root) {
+            if base < 0 {
+                break;
+            }
+            let max_c = cmp::min(
+                TRIE_CHAR_MAX as TrieIndex,
+                self.cells.len() as TrieIndex - base,
+            );
+            let c = (0..=max_c).find(|c| self.get_check(base + c) == Some(root))?;
+            keybuff.write_u8(c as TrieChar).unwrap();
+            root = base + c;
+        }
+        Some(root)
+    }
+
+    /// Find the next separate node under a sub-trie rooted at `root` starting
+    /// from the current separate node `sep`.
+    ///
+    /// Return offset of `keybuff` from the key which walks
+    /// to previous separate node to the one which walks to the new separate node
+    /// So, it is assumed to be initialized by at least one first_separate()
+    /// call before. This incremental key calculation is more efficient than later
+    /// totally reconstructing key from the given separate node.
+    pub(crate) fn da_next_separate(
+        &mut self,
+        root: TrieIndex,
+        sep: TrieIndex,
+        keybuff: &TrieString,
+    ) -> Option<(TrieIndex)> {
+        todo!()
+        // let mut sep = sep;
+        // while sep != root {
+        //     let parent = self.get_check(sep).unwrap();
+        //     let base = self.get_base(parent).unwrap();
+        //     let c = sep - base;
+        //     trie_string_cut_last(keybuff);
+        //     let max_c = cmp::min(
+        //         TRIE_CHAR_MAX as TrieIndex,
+        //         self.cells.len() as TrieIndex - base,
+        //     );
+        //     for c in (c+1)..=max_c {
+        //         if self.get_check(base + c) == Some(parent) {
+        //             trie_string_append_char(keybuff, c as TrieChar);
+        //             return da_first_separate(d, base + c, keybuff);
+        //         }
+        //     }
+        //     sep = parent;
+        // }
+        // None
+    }
+
     pub(crate) fn serialized_size(&self) -> usize {
         if !self.cells.is_empty() {
             4 * self.cells.len() * 2 // `base` and `check`
@@ -627,7 +690,7 @@ pub unsafe extern "C" fn da_first_separate(
         if c > max_c {
             return TRIE_INDEX_ERROR;
         }
-        trie_string_append_char(keybuff, c as TrieChar);
+        trie_string_append_char(NonNull::new_unchecked(keybuff), c as TrieChar);
         root = base + c;
     }
     return root;
@@ -650,7 +713,7 @@ pub unsafe extern "C" fn da_next_separate(
         parent = da.get_check(sep).unwrap_or(TRIE_INDEX_ERROR);
         base = da.get_base(parent).unwrap_or(TRIE_INDEX_ERROR);
         c = sep - base;
-        trie_string_cut_last(keybuff);
+        trie_string_cut_last(NonNull::new_unchecked(keybuff));
         max_c = cmp::min(
             TRIE_CHAR_MAX as TrieIndex,
             da.cells.len() as TrieIndex - base,
@@ -661,7 +724,7 @@ pub unsafe extern "C" fn da_next_separate(
                 break;
             }
             if da.get_check(base + c) == Some(parent) {
-                trie_string_append_char(keybuff, c as TrieChar);
+                trie_string_append_char(NonNull::new_unchecked(keybuff), c as TrieChar);
                 return da_first_separate(d, base + c, keybuff);
             }
         }
