@@ -347,10 +347,10 @@ impl DArray {
     /// `root` to the separate node. This is for incrementally calculating the
     /// transition key, which is more efficient than later totally reconstructing
     /// key from the given separate node.
-    pub(crate) extern "C" fn first_separate<T: Write>(
+    pub(crate) fn first_separate(
         &mut self,
         root: TrieIndex,
-        keybuff: &mut T,
+        keybuff: &mut TrieString,
     ) -> Option<TrieIndex> {
         let mut root = root;
         while let Some(base) = self.get_base(root) {
@@ -362,7 +362,7 @@ impl DArray {
                 self.cells.len() as TrieIndex - base,
             );
             let c = (0..=max_c).find(|c| self.get_check(base + c) == Some(root))?;
-            keybuff.write_u8(c as TrieChar).unwrap();
+            keybuff.append(c as TrieChar);
             root = base + c;
         }
         Some(root)
@@ -660,40 +660,16 @@ fn da_free_cell(mut d: NonNull<DArray>, cell: TrieIndex) {
     da.free_cell(cell)
 }
 
+#[deprecated(note = "Use d.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
 #[no_mangle]
-pub unsafe extern "C" fn da_first_separate(
+pub extern "C" fn da_first_separate(
     mut d: NonNull<DArray>,
-    mut root: TrieIndex,
-    keybuff: *mut TrieString,
+    root: TrieIndex,
+    mut keybuff: NonNull<TrieString>,
 ) -> TrieIndex {
     let da = unsafe { d.as_mut() };
-    // TODO: Port
-    let mut base: TrieIndex = 0;
-    let mut c: TrieIndex = 0;
-    let mut max_c: TrieIndex = 0;
-    loop {
-        base = da.get_base(root).unwrap_or(TRIE_INDEX_ERROR);
-        if !(base >= 0 as libc::c_int) {
-            break;
-        }
-        max_c = cmp::min(
-            TRIE_CHAR_MAX as TrieIndex,
-            da.cells.len() as TrieIndex - base,
-        );
-        c = 0 as libc::c_int;
-        while c <= max_c {
-            if da.get_check(base + c) == Some(root) {
-                break;
-            }
-            c += 1;
-        }
-        if c > max_c {
-            return TRIE_INDEX_ERROR;
-        }
-        trie_string_append_char(NonNull::new_unchecked(keybuff), c as TrieChar);
-        root = base + c;
-    }
-    return root;
+    let keybuff = unsafe { keybuff.as_mut() };
+    da.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR)
 }
 
 #[no_mangle]
@@ -701,9 +677,10 @@ pub unsafe extern "C" fn da_next_separate(
     mut d: NonNull<DArray>,
     root: TrieIndex,
     mut sep: TrieIndex,
-    keybuff: *mut TrieString,
+    mut keybuff: NonNull<TrieString>,
 ) -> TrieIndex {
     let da = unsafe { d.as_mut() };
+    let keybuff = unsafe { keybuff.as_mut()};
     // TODO: Port
     let mut parent: TrieIndex = 0;
     let mut base: TrieIndex = 0;
@@ -725,7 +702,7 @@ pub unsafe extern "C" fn da_next_separate(
             }
             if da.get_check(base + c) == Some(parent) {
                 trie_string_append_char(NonNull::new_unchecked(keybuff), c as TrieChar);
-                return da_first_separate(d, base + c, keybuff);
+                return da.first_separate(base + c, keybuff).unwrap_or(TRIE_INDEX_ERROR);
             }
         }
         sep = parent;
