@@ -1,12 +1,12 @@
-use std::{io, iter, ptr};
 use std::io::{Read, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
+use std::{io, iter, ptr};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
-use crate::trie_string::{TRIE_CHAR_TERM, TrieChar};
+use crate::trie_string::{TrieChar, TRIE_CHAR_TERM};
 use crate::types::*;
 
 #[derive(Clone, Default)]

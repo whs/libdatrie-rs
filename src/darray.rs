@@ -38,6 +38,7 @@ impl DArray {
 
     /// Get BASE cell value for the given state.
     pub(crate) fn get_base(&self, s: TrieIndex) -> Option<TrieIndex> {
+        // TODO: Handle TRIE_INDEX_ERROR?
         self.cells.get(s as usize).map(|v| v.base)
     }
 

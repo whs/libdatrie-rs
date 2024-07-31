@@ -26,7 +26,8 @@ extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
 }
-pub type size_t = libc::c_ulong;
+type size_t = libc::c_ulong;
+const NULL: libc::c_int = 0;
 
 pub type TrieChar = u8;
 
@@ -260,27 +261,6 @@ impl Trie {
     }
 }
 
-pub type TrieEnumFunc =
-    Option<unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool>;
-
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct TrieState {
-    trie: *mut Trie,
-    index: TrieIndex,
-    suffix_idx: libc::c_short,
-    is_suffix: libc::c_short,
-}
-
-#[repr(C)]
-pub struct TrieIterator {
-    root: *const TrieState,
-    state: *mut TrieState,
-    key: *mut TrieString,
-}
-
-pub const NULL: libc::c_int = 0 as libc::c_int;
-
 #[deprecated(note = "Use Trie::new()")]
 #[no_mangle]
 pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
@@ -388,7 +368,7 @@ pub extern "C" fn trie_retrieve(
 
 #[deprecated(note = "Use trie.store()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_store(
+pub extern "C" fn trie_store(
     mut trie: NonNull<Trie>,
     key: *const AlphaChar,
     data: TrieData,
@@ -401,7 +381,7 @@ pub unsafe extern "C" fn trie_store(
 
 #[deprecated(note = "Use trie.store_if_absent()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_store_if_absent(
+pub extern "C" fn trie_store_if_absent(
     mut trie: NonNull<Trie>,
     key: *const AlphaChar,
     data: TrieData,
@@ -413,50 +393,53 @@ pub unsafe extern "C" fn trie_store_if_absent(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn trie_delete(mut trie: *mut Trie, mut key: *const AlphaChar) -> Bool {
-    let mut trie = unsafe { &mut *trie };
-    let mut s: TrieIndex = 0;
-    let mut t: TrieIndex = 0;
-    let mut suffix_idx: libc::c_short = 0;
-    let mut p: *const AlphaChar = 0 as *const AlphaChar;
-    s = da_get_root(&trie.da);
-    p = key;
-    while !(da_get_base(&trie.da, s) < 0 as libc::c_int) {
-        let mut tc: TrieIndex = alpha_map_char_to_trie(&trie.alpha_map, *p);
-        if TRIE_INDEX_MAX == tc {
-            return FALSE as Bool;
+pub unsafe extern "C" fn trie_delete(mut trie: NonNull<Trie>, key: *const AlphaChar) -> Bool {
+    let mut trie = trie.as_mut();
+
+    let mut s = trie.da.get_root();
+    let mut p = key;
+    while !trie.da.is_separate(s) {
+        let Some(tc) = trie.alpha_map.char_to_trie(*p) else {
+            return FALSE;
+        };
+        if let Some(new_s) = trie.da.walk(s, tc as TrieChar) {
+            s = new_s;
+        } else {
+            return FALSE;
         }
-        if !da_walk(&trie.da, &mut s, tc as TrieChar) {
-            return FALSE as Bool;
-        }
-        if 0 as libc::c_int as AlphaChar == *p {
+        if *p == 0 {
             break;
         }
         p = p.offset(1);
-        p;
     }
-    t = -da_get_base(&trie.da, s);
-    suffix_idx = 0 as libc::c_int as libc::c_short;
+    let t = trie.da.get_tail_index(s);
+    let mut suffix_idx = 0;
     loop {
-        let mut tc_0: TrieIndex = alpha_map_char_to_trie(&trie.alpha_map, *p);
-        if TRIE_INDEX_MAX == tc_0 {
-            return FALSE as Bool;
+        let Some(tc) = trie.alpha_map.char_to_trie(*p) else {
+            return FALSE;
+        };
+        if let Some(new_idx) = trie.tail.walk_char(t, suffix_idx, tc as TrieChar) {
+            suffix_idx = new_idx;
+        } else {
+            return FALSE;
         }
-        if !tail_walk_char(&trie.tail, t, &mut suffix_idx, tc_0 as TrieChar) {
-            return FALSE as Bool;
-        }
-        if 0 as libc::c_int as AlphaChar == *p {
+        if *p == 0 {
             break;
         }
         p = p.offset(1);
-        p;
     }
-    tail_delete((&trie.tail).into(), t);
-    da_set_base((&trie.da).into(), s, TRIE_INDEX_ERROR);
-    da_prune((&trie.da).into(), s);
+
+    trie.tail.delete(t);
+    trie.da.set_base(s, TRIE_INDEX_ERROR);
+    trie.da.prune(s);
+
     trie.is_dirty.set(true);
-    return TRUE as Bool;
+    TRUE
 }
+
+pub type TrieEnumFunc =
+    Option<unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool>;
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_enumerate(
     mut trie: *mut Trie,
@@ -496,6 +479,16 @@ pub unsafe extern "C" fn trie_root(mut trie: *mut Trie) -> *mut TrieState {
         Into::<u32>::into(FALSE) as libc::c_short,
     );
 }
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct TrieState {
+    trie: *mut Trie,
+    index: TrieIndex,
+    suffix_idx: libc::c_short,
+    is_suffix: libc::c_short,
+}
+
 unsafe extern "C" fn trie_state_new(
     mut trie: *mut Trie,
     mut index: TrieIndex,
@@ -625,6 +618,14 @@ pub unsafe extern "C" fn trie_state_get_data(mut s: *const TrieState) -> TrieDat
     }
     return TRIE_DATA_ERROR;
 }
+
+#[repr(C)]
+pub struct TrieIterator {
+    root: *const TrieState,
+    state: *mut TrieState,
+    key: *mut TrieString,
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_iterator_new(mut s: *mut TrieState) -> *mut TrieIterator {
     let mut iter: *mut TrieIterator = 0 as *mut TrieIterator;
