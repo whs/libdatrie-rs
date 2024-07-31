@@ -9,21 +9,16 @@ use std::{io, iter, ptr, slice};
 
 use ::libc;
 
-use crate::alpha_map::{
-    alpha_map_char_to_trie, alpha_map_char_to_trie_str, alpha_map_trie_to_char, AlphaMap,
-};
+use crate::alpha_map::{alpha_map_char_to_trie, alpha_map_trie_to_char, AlphaMap};
 use crate::darray::{
-    da_first_separate, da_get_base, da_get_check, da_get_root, da_insert_branch, da_next_separate,
-    da_output_symbols, da_prune, da_prune_upto, da_set_base, da_walk, DArray,
+    da_first_separate, da_get_base, da_get_check, da_get_root, da_next_separate, da_output_symbols,
+    da_prune, da_set_base, da_walk, DArray,
 };
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::tail::{
-    tail_delete, tail_get_data, tail_get_suffix, tail_set_data, tail_set_suffix, tail_walk_char,
-    Tail,
-};
+use crate::tail::{tail_delete, tail_get_data, tail_get_suffix, tail_walk_char, Tail};
 use crate::trie_string::{
-    trie_char_as_slice, trie_char_strlen, trie_string_free, trie_string_get_val,
-    trie_string_length, trie_string_new, TrieString, TRIE_CHAR_TERM,
+    trie_char_strlen, trie_string_free, trie_string_get_val, trie_string_length, trie_string_new,
+    TrieString, TRIE_CHAR_TERM,
 };
 use crate::types::*;
 
@@ -105,9 +100,71 @@ impl Trie {
         self.is_dirty.get()
     }
 
-    // fn store_conditionally(&mut self, key: &[AlphaChar], data: TrieData, is_overwrite: bool) -> bool {
-    //
-    // }
+    pub fn store(&mut self, key: &[AlphaChar], data: TrieData) -> bool {
+        self.store_conditionally(key, data, true)
+    }
+
+    pub fn store_if_absent(&mut self, key: &[AlphaChar], data: TrieData) -> bool {
+        self.store_conditionally(key, data, false)
+    }
+
+    fn store_conditionally(
+        &mut self,
+        key: &[AlphaChar],
+        data: TrieData,
+        is_overwrite: bool,
+    ) -> bool {
+        // walk through branches
+        let mut s = self.da.get_root();
+        let mut p = key;
+        while !self.da.is_separate(s) {
+            let Some(tc) = self.alpha_map.char_to_trie(p[0]) else {
+                return false;
+            };
+            if let Some(next_s) = self.da.walk(s, tc as TrieChar) {
+                s = next_s;
+            } else {
+                let Some(key_str) = self.alpha_map.char_to_trie_str(p) else {
+                    return false;
+                };
+                return self.branch_in_branch(s, &key_str, data).into();
+            }
+            if p[0] == 0 {
+                break;
+            }
+            p = &p[1..];
+        }
+
+        // walk through tail
+        let sep = p;
+        let t = -self.da.get_tail_index(s);
+        let mut suffix_idx = 0;
+        loop {
+            let Some(tc) = self.alpha_map.char_to_trie(p[0]) else {
+                return false;
+            };
+            if let Some(next_idx) = self.tail.walk_char(t, suffix_idx, tc as TrieChar) {
+                suffix_idx = next_idx;
+            } else {
+                let Some(tail_str) = self.alpha_map.char_to_trie_str(sep) else {
+                    return false;
+                };
+                return self.branch_in_tail(s, &tail_str, data).into();
+            }
+            if p[0] == 0 {
+                break;
+            }
+            p = &p[1..];
+        }
+
+        // duplicated, overwrite val if flagged
+        if !is_overwrite {
+            return false;
+        }
+        self.tail.set_data(t, Some(data));
+        self.is_dirty.set(true);
+        true
+    }
 
     pub fn retrieve(&self, key: &[AlphaChar]) -> Option<TrieData> {
         // walk through branches
@@ -329,109 +386,30 @@ pub extern "C" fn trie_retrieve(
     }
 }
 
+#[deprecated(note = "Use trie.store()")]
 #[no_mangle]
 pub unsafe extern "C" fn trie_store(
-    mut trie: *mut Trie,
-    mut key: *const AlphaChar,
-    mut data: TrieData,
-) -> Bool {
-    return trie_store_conditionally(trie, key, data, true);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn trie_store_if_absent(
-    mut trie: *mut Trie,
-    mut key: *const AlphaChar,
-    mut data: TrieData,
-) -> Bool {
-    return trie_store_conditionally(trie, key, data, false);
-}
-
-unsafe fn trie_store_conditionally(
-    mut trie: *mut Trie,
-    mut key: *const AlphaChar,
+    mut trie: NonNull<Trie>,
+    key: *const AlphaChar,
     data: TrieData,
-    is_overwrite: bool,
 ) -> Bool {
-    let trie = unsafe { &mut *trie };
+    let trie = unsafe { trie.as_mut() };
     let key_slice = alpha_char_as_slice(key);
 
-    // walk through branches
-    let mut s = trie.da.get_root();
-    let mut p = key;
-    while !trie.da.is_separate(s) {
-        let Some(mut tc) = trie.alpha_map.char_to_trie(*p) else {
-            return FALSE;
-        };
-        if let Some(next_s) = trie.da.walk(s, tc as TrieChar) {
-            s = next_s;
-        } else {
-            // TODO: alpha_char_as_slice is not needed if we use key_slice and not p
-            let Some(key_str) = trie.alpha_map.char_to_trie_str(alpha_char_as_slice(p)) else {
-                return FALSE;
-            };
-            return trie.branch_in_branch(s, &key_str, data).into();
-        }
-        if *p == 0 {
-            break;
-        }
-        p = p.offset(1);
-    }
-
-    // walk through tail
-    let sep = p;
-    let t = -trie.da.get_tail_index(s);
-    let mut suffix_idx = 0;
-    loop {
-        let Some(mut tc) = trie.alpha_map.char_to_trie(*p) else {
-            return FALSE;
-        };
-        if let Some(next_idx) = trie.tail.walk_char(t, suffix_idx, tc as TrieChar) {
-            suffix_idx = next_idx;
-        } else {
-            // TODO: alpha_char_as_slice is not needed if we use key_slice and not p
-            let Some(tail_str) = trie.alpha_map.char_to_trie_str(alpha_char_as_slice(sep)) else {
-                return FALSE;
-            };
-            return trie.branch_in_tail(s, &tail_str, data).into();
-        }
-        if *p == 0 {
-            break;
-        }
-        p = p.offset(1);
-    }
-
-    // duplicated, overwrite val if flagged
-    if !is_overwrite {
-        return FALSE;
-    }
-    trie.tail.set_data(t, Some(data));
-    trie.is_dirty.set(true);
-    TRUE
+    trie.store_conditionally(key_slice, data, true).into()
 }
 
-#[deprecated(note = "Use trie.branch_in_branch()")]
-fn trie_branch_in_branch(
+#[deprecated(note = "Use trie.store_if_absent()")]
+#[no_mangle]
+pub unsafe extern "C" fn trie_store_if_absent(
     mut trie: NonNull<Trie>,
-    sep_node: TrieIndex,
-    suffix: *const TrieChar,
+    key: *const AlphaChar,
     data: TrieData,
 ) -> Bool {
     let trie = unsafe { trie.as_mut() };
-    let suffix_slice = trie_char_as_slice(suffix);
-    trie.branch_in_branch(sep_node, suffix_slice, data).into()
-}
+    let key_slice = alpha_char_as_slice(key);
 
-#[deprecated(note = "Use trie.branch_in_tail()")]
-fn trie_branch_in_tail(
-    mut trie: NonNull<Trie>,
-    sep_node: TrieIndex,
-    suffix: *const TrieChar,
-    data: TrieData,
-) -> Bool {
-    let trie = unsafe { trie.as_mut() };
-    let suffix_slice = trie_char_as_slice(suffix);
-    trie.branch_in_tail(sep_node, suffix_slice, data).into()
+    trie.store_conditionally(key_slice, data, false).into()
 }
 
 #[no_mangle]
