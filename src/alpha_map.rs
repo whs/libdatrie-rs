@@ -1,12 +1,12 @@
-use std::{io, iter, ptr, slice};
 use std::io::{Read, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
+use std::{io, iter, ptr, slice};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
-use crate::trie_string::{trie_char_as_slice, TRIE_CHAR_TERM, TrieChar};
+use crate::trie_string::{trie_char_as_slice, TrieChar, TRIE_CHAR_TERM};
 use crate::types::*;
 
 #[derive(Clone, Default)]
@@ -125,20 +125,19 @@ impl AlphaMap {
         self.trie_to_alpha_map = trie_to_alpha_map;
     }
 
-    pub(crate) fn char_to_trie(&self, ac: AlphaChar) -> TrieIndex {
+    pub(crate) fn char_to_trie(&self, ac: AlphaChar) -> Option<TrieIndex> {
         if ac == 0 {
-            return TRIE_CHAR_TERM as TrieIndex;
+            return Some(TRIE_CHAR_TERM as TrieIndex);
         }
 
         if (self.alpha_begin..=self.alpha_end).contains(&ac) {
             return self
                 .alpha_to_trie_map
                 .get((ac - self.alpha_begin) as usize)
-                .copied()
-                .unwrap_or(TRIE_INDEX_MAX);
+                .copied();
         }
 
-        TRIE_INDEX_MAX
+        None
     }
 
     pub(crate) fn trie_to_char(&self, tc: TrieChar) -> AlphaChar {
@@ -193,11 +192,9 @@ pub(crate) extern "C" fn alpha_map_char_to_trie(
     alpha_map: *const AlphaMap,
     ac: AlphaChar,
 ) -> TrieIndex {
-    if ac == 0 {
-        return TRIE_CHAR_TERM as TrieIndex;
-    }
-
-    (unsafe { &*alpha_map }).char_to_trie(ac)
+    (unsafe { &*alpha_map })
+        .char_to_trie(ac)
+        .unwrap_or(TRIE_INDEX_MAX)
 }
 
 #[deprecated(note = "Use alpha_map.trie_to_char()")]
@@ -219,13 +216,7 @@ pub(crate) extern "C" fn alpha_map_char_to_trie_str(
 
     let out_vec: Option<Vec<TrieChar>> = str
         .iter()
-        .map(|v| {
-            let tc = am.char_to_trie(*v);
-            if tc == TRIE_INDEX_MAX {
-                return None;
-            }
-            Some(tc as TrieChar)
-        })
+        .map(|v| am.char_to_trie(*v).map(|v| v as TrieChar))
         .chain(iter::once(Some(TRIE_CHAR_TERM)))
         .collect();
 

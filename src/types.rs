@@ -1,6 +1,7 @@
 use null_terminated::Nul;
 use std::cmp::Ordering;
 use std::ops::{Deref, Not};
+use std::slice;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
@@ -72,6 +73,12 @@ pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;
 #[no_mangle]
 pub extern "C" fn alpha_char_strlen(str: *const AlphaChar) -> i32 {
     unsafe { Nul::new_unchecked(str) }.len() as i32
+}
+
+/// Return an AlphaChar string as slice, including the null byte
+pub(crate) fn alpha_char_as_slice(str: *const AlphaChar) -> &'static [AlphaChar] {
+    let len = alpha_char_strlen(str) as usize + 1;
+    unsafe { slice::from_raw_parts(str, len) }
 }
 
 #[no_mangle]

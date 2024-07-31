@@ -1,10 +1,10 @@
-use std::{io, ptr, slice};
 use std::io::{Read, Write};
 use std::ptr::NonNull;
+use std::{io, ptr, slice};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::trie::{TRIE_DATA_ERROR, TrieChar, TrieData};
+use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR};
 use crate::trie_string::{trie_char_clone, TRIE_CHAR_TERM};
 use crate::types::*;
 

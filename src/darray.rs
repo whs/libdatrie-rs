@@ -1,11 +1,11 @@
-use std::{cmp, io};
 use std::io::{Read, Write};
 use std::ptr::NonNull;
+use std::{cmp, io};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::symbols::Symbols;
-use crate::trie_string::{TRIE_CHAR_MAX, TrieChar, TrieString};
+use crate::trie_string::{TrieChar, TrieString, TRIE_CHAR_MAX};
 use crate::types::*;
 
 #[derive(Default, Clone)]
@@ -71,6 +71,7 @@ impl DArray {
     /// Walk the double-array trie from state `s`, using input character `c`.
     /// If there exists an edge from `s` with arc labeled `c`, this function
     /// returns the new state. Otherwise, it returns None.
+    #[must_use]
     pub(crate) fn walk(&self, s: TrieIndex, c: TrieChar) -> Option<TrieIndex> {
         // The C code doesn't handle get_base() error here
         // either it is infallible or it abuses TRIE_INDEX_ERROR
@@ -448,6 +449,18 @@ impl DArray {
             writer.write_i32::<BigEndian>(cell.check)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn is_separate(&self, s: TrieIndex) -> bool {
+        self.get_base(s).unwrap() < 0
+    }
+
+    pub(crate) fn get_tail_index(&self, s: TrieIndex) -> TrieIndex {
+        -self.get_base(s).unwrap()
+    }
+
+    pub(crate) fn set_tail_index(&mut self, s: TrieIndex, v: TrieIndex) -> Option<()> {
+        self.set_base(s, -v)
     }
 }
 

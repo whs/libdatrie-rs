@@ -152,7 +152,10 @@ pub(crate) extern "C" fn trie_string_clear(mut ts: NonNull<TrieString>) {
 
 #[deprecated(note = "Use src.clone()")]
 #[no_mangle]
-pub(crate) extern "C" fn trie_string_copy(mut dst: NonNull<TrieString>, src: *const TrieString) -> Bool {
+pub(crate) extern "C" fn trie_string_copy(
+    mut dst: NonNull<TrieString>,
+    src: *const TrieString,
+) -> Bool {
     let src = unsafe { &*src };
     let dst = unsafe { dst.as_mut() };
 
@@ -163,7 +166,10 @@ pub(crate) extern "C" fn trie_string_copy(mut dst: NonNull<TrieString>, src: *co
 
 #[deprecated(note = "Use dst.append_from_str()")]
 #[no_mangle]
-pub(crate) extern "C" fn trie_string_append(mut dst: NonNull<TrieString>, src: *const TrieString) -> Bool {
+pub(crate) extern "C" fn trie_string_append(
+    mut dst: NonNull<TrieString>,
+    src: *const TrieString,
+) -> Bool {
     let src = unsafe { &*src };
     let dst = unsafe { dst.as_mut() };
     dst.append_from_str(src);
@@ -188,7 +194,10 @@ pub(crate) extern "C" fn trie_string_append_string(
 
 #[deprecated(note = "Use ts.append()")]
 #[no_mangle]
-pub(crate) extern "C" fn trie_string_append_char(mut ts: NonNull<TrieString>, tc: TrieChar) -> Bool {
+pub(crate) extern "C" fn trie_string_append_char(
+    mut ts: NonNull<TrieString>,
+    tc: TrieChar,
+) -> Bool {
     let ts = unsafe { ts.as_mut() };
     ts.append(tc);
     TRUE
