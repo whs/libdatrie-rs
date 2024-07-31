@@ -1,4 +1,3 @@
-use std::{io, iter, ptr, slice};
 use std::cell::Cell;
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
@@ -6,6 +5,7 @@ use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
+use std::{io, iter, ptr, slice};
 
 use ::libc;
 
@@ -18,12 +18,12 @@ use crate::darray::{
 };
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::{
-    Tail, tail_delete, tail_get_data, tail_get_suffix, tail_set_data,
-    tail_set_suffix, tail_walk_char,
+    tail_delete, tail_get_data, tail_get_suffix, tail_set_data, tail_set_suffix, tail_walk_char,
+    Tail,
 };
 use crate::trie_string::{
-    trie_char_as_slice, trie_char_strlen, TRIE_CHAR_TERM, trie_string_free,
-    trie_string_get_val, trie_string_length, trie_string_new, TrieString,
+    trie_char_as_slice, trie_char_strlen, trie_string_free, trie_string_get_val,
+    trie_string_length, trie_string_new, TrieString, TRIE_CHAR_TERM,
 };
 use crate::types::*;
 
@@ -133,7 +133,7 @@ impl Trie {
 
         // found
         // unwrap as an assertion since this should never fail
-        Some(self.tail.get_data(s as usize).unwrap())
+        Some(self.tail.get_data(s).unwrap())
     }
 
     fn branch_in_branch(
@@ -151,11 +151,51 @@ impl Trie {
         }
 
         let new_tail = self.tail.add_suffix(Some(suffix.into()));
-        self.tail.set_data(new_tail as usize, Some(data));
+        self.tail.set_data(new_tail, Some(data));
         self.da.set_tail_index(new_da, new_tail);
 
         self.is_dirty.set(true);
         true
+    }
+
+    fn branch_in_tail(&mut self, sep_node: TrieIndex, suffix: &[TrieChar], data: TrieData) -> bool {
+        // adjust separate point in old path
+        let old_tail = self.da.get_tail_index(sep_node);
+        let Some(old_suffix) = self.tail.get_suffix(old_tail) else {
+            return false;
+        };
+
+        let mut p = old_suffix;
+        let mut s = sep_node;
+        let mut suffix = suffix;
+        while p[0] == suffix[0] {
+            let Some(t) = self.da.insert_branch(s, p[0]) else {
+                // TODO: Move to fail() code
+                self.da.prune_upto(sep_node, s);
+                self.da.set_tail_index(sep_node, old_tail);
+                return false;
+            };
+            s = t;
+
+            p = &p[1..];
+            suffix = &suffix[1..];
+        }
+
+        let Some(old_da) = self.da.insert_branch(s, p[0]) else {
+            // TODO: Move to fail() code
+            self.da.prune_upto(sep_node, s);
+            self.da.set_tail_index(sep_node, old_tail);
+            return false;
+        };
+
+        if p[0] != TRIE_CHAR_TERM {
+            p = &p[1..];
+        }
+        self.tail.set_suffix(old_tail, Some(p.into()));
+        self.da.set_tail_index(old_da, old_tail);
+
+        // insert the new branch at the new separate point
+        self.branch_in_branch(s, suffix, data)
     }
 }
 
@@ -354,7 +394,7 @@ unsafe extern "C" fn trie_store_conditionally(
             if tail_str.is_null() {
                 return FALSE as Bool;
             }
-            res_0 = trie_branch_in_tail(trie, s, tail_str, data);
+            res_0 = trie_branch_in_tail(trie.into(), s, tail_str, data);
             free(tail_str as *mut libc::c_void);
             return res_0;
         }
@@ -384,61 +424,18 @@ fn trie_branch_in_branch(
     trie.branch_in_branch(sep_node, suffix_slice, data).into()
 }
 
-unsafe extern "C" fn trie_branch_in_tail(
-    mut trie: *mut Trie,
-    mut sep_node: TrieIndex,
-    mut suffix: *const TrieChar,
-    mut data: TrieData,
+#[deprecated(note = "Use trie.branch_in_tail()")]
+fn trie_branch_in_tail(
+    mut trie: NonNull<Trie>,
+    sep_node: TrieIndex,
+    suffix: *const TrieChar,
+    data: TrieData,
 ) -> Bool {
-    let trie = unsafe { &mut *trie };
-    let mut current_block: u64;
-    let mut old_tail: TrieIndex = 0;
-    let mut old_da: TrieIndex = 0;
-    let mut s: TrieIndex = 0;
-    let mut old_suffix: *const TrieChar = 0 as *const TrieChar;
-    let mut p: *const TrieChar = 0 as *const TrieChar;
-    old_tail = -da_get_base(&trie.da, sep_node);
-    old_suffix = tail_get_suffix(&trie.tail, old_tail);
-    if old_suffix.is_null() {
-        return FALSE as Bool;
-    }
-    p = old_suffix;
-    s = sep_node;
-    loop {
-        if !(*p as libc::c_int == *suffix as libc::c_int) {
-            current_block = 6937071982253665452;
-            break;
-        }
-        let mut t: TrieIndex = da_insert_branch((&trie.da).into(), s, *p);
-        if TRIE_INDEX_ERROR == t {
-            current_block = 3141307649429454656;
-            break;
-        }
-        s = t;
-        p = p.offset(1);
-        p;
-        suffix = suffix.offset(1);
-        suffix;
-    }
-    match current_block {
-        6937071982253665452 => {
-            old_da = da_insert_branch((&trie.da).into(), s, *p);
-            if !(TRIE_INDEX_ERROR == old_da) {
-                if TRIE_CHAR_TERM != *p {
-                    p = p.offset(1);
-                    p;
-                }
-                tail_set_suffix((&trie.tail).into(), old_tail, p);
-                da_set_base((&trie.da).into(), old_da, -old_tail);
-                return trie_branch_in_branch(trie.into(), s, suffix, data);
-            }
-        }
-        _ => {}
-    }
-    da_prune_upto((&trie.da).into(), sep_node, s);
-    da_set_base((&trie.da).into(), sep_node, -old_tail);
-    return FALSE as Bool;
+    let trie = unsafe { trie.as_mut() };
+    let suffix_slice = trie_char_as_slice(suffix);
+    trie.branch_in_tail(sep_node, suffix_slice, data).into()
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_delete(mut trie: *mut Trie, mut key: *const AlphaChar) -> Bool {
     let mut trie = unsafe { &mut *trie };

@@ -18,9 +18,9 @@ const TAIL_SIGNATURE: u32 = 0xdffcdffc;
 const TAIL_START_BLOCKNO: TrieIndex = 1;
 
 impl Tail {
-    pub(crate) fn get_suffix(&self, index: usize) -> Option<&[TrieChar]> {
-        let index = index - TAIL_START_BLOCKNO as usize;
-        match self.tails.get(index).map(|v| &v.suffix) {
+    pub(crate) fn get_suffix(&self, index: TrieIndex) -> Option<&[TrieChar]> {
+        let index = index - TAIL_START_BLOCKNO;
+        match self.tails.get(index as usize).map(|v| &v.suffix) {
             Some(Some(ref v)) => Some(&v),
             _ => None,
         }
@@ -43,16 +43,16 @@ impl Tail {
         new_block
     }
 
-    pub(crate) fn get_data(&self, index: usize) -> Option<TrieData> {
-        let index = index - TAIL_START_BLOCKNO as usize;
-        self.tails.get(index).map(|v| v.data).flatten()
+    pub(crate) fn get_data(&self, index: TrieIndex) -> Option<TrieData> {
+        let index = index - TAIL_START_BLOCKNO;
+        self.tails.get(index as usize).map(|v| v.data).flatten()
     }
 
-    pub(crate) fn set_data(&mut self, index: usize, data: Option<TrieData>) -> Option<()> {
-        let index = index - TAIL_START_BLOCKNO as usize;
+    pub(crate) fn set_data(&mut self, index: TrieIndex, data: Option<TrieData>) -> Option<()> {
+        let index = index - TAIL_START_BLOCKNO;
         // TRIE_DATA_ERROR in C is mapped to None
         debug_assert_ne!(data, Some(TRIE_DATA_ERROR));
-        match self.tails.get_mut(index) {
+        match self.tails.get_mut(index as usize) {
             Some(block) => {
                 block.data = data;
                 Some(())
@@ -74,7 +74,7 @@ impl Tail {
     /// total number of character successfully walked.
     #[must_use]
     pub(crate) fn walk_str(&self, s: TrieIndex, suffix_idx: i16, str: &[TrieChar]) -> (i16, i32) {
-        let Some(suffix) = self.get_suffix(s as usize) else {
+        let Some(suffix) = self.get_suffix(s) else {
             return (suffix_idx, 0);
         };
 
@@ -103,7 +103,7 @@ impl Tail {
     /// it returns `Some(next_character_idx)`. Otherwise, it returns `None`
     #[must_use]
     pub(crate) fn walk_char(&self, s: TrieIndex, suffix_idx: i16, c: TrieChar) -> Option<i16> {
-        let suffix = self.get_suffix(s as usize)?;
+        let suffix = self.get_suffix(s)?;
         let suffix_char = suffix[suffix_idx as usize];
         if suffix_char == c {
             if TRIE_CHAR_TERM != suffix_char {
@@ -275,7 +275,7 @@ impl Default for TailBlock {
 #[no_mangle]
 pub(crate) extern "C" fn tail_get_suffix(t: *const Tail, index: TrieIndex) -> *const TrieChar {
     let tail = unsafe { &*t };
-    match tail.get_suffix(index as usize) {
+    match tail.get_suffix(index) {
         Some(v) => v.as_ptr(),
         None => ptr::null(),
     }
@@ -309,7 +309,7 @@ pub(crate) unsafe extern "C" fn tail_add_suffix(
 #[no_mangle]
 pub(crate) extern "C" fn tail_get_data(t: *const Tail, index: TrieIndex) -> TrieData {
     let tail = unsafe { &*t };
-    match tail.get_data(index as usize) {
+    match tail.get_data(index) {
         Some(v) => v,
         None => TRIE_DATA_ERROR,
     }
@@ -327,7 +327,7 @@ pub(crate) extern "C" fn tail_set_data(
         TRIE_DATA_ERROR => None,
         v => Some(v),
     };
-    tail.set_data(index as usize, data).is_some().into()
+    tail.set_data(index, data).is_some().into()
 }
 
 /// Delete suffix entry from the tail data.
