@@ -1,14 +1,12 @@
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::{io, iter, ptr, slice};
+use std::io::{Read, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
-use std::{io, iter, ptr, slice};
 
-use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
-use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie_string::{trie_char_strlen, TrieChar, TRIE_CHAR_TERM};
+use crate::trie_string::{trie_char_as_slice, TRIE_CHAR_TERM, TrieChar};
 use crate::types::*;
 
 #[derive(Clone, Default)]
@@ -174,58 +172,6 @@ pub unsafe extern "C" fn alpha_map_free(mut alpha_map: NonNull<AlphaMap>) {
     drop(am) // This is not strictly needed, but it helps in clarity
 }
 
-#[deprecated(note = "Use AlphaMap::read(). Careful about file position on failure!")]
-#[no_mangle]
-pub(crate) extern "C" fn alpha_map_fread_bin(file: NonNull<libc::FILE>) -> *mut AlphaMap {
-    let mut file = wrap_cfile_nonnull(file);
-    let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
-
-    match AlphaMap::read(&mut file) {
-        Ok(am) => Box::into_raw(Box::new(am)),
-        Err(_) => {
-            // Return to save_pos if read fail
-            let _ = file.seek(SeekFrom::Start(save_pos));
-            return ptr::null_mut();
-        }
-    }
-}
-
-#[deprecated(note = "Use alpha_map.serialize()")]
-#[no_mangle]
-pub(crate) extern "C" fn alpha_map_fwrite_bin(
-    alpha_map: *const AlphaMap,
-    file: NonNull<libc::FILE>,
-) -> i32 {
-    let mut file = wrap_cfile_nonnull(file);
-
-    let am = unsafe { &*alpha_map };
-
-    match am.serialize(&mut file) {
-        Ok(_) => 0,
-        Err(_) => -1,
-    }
-}
-
-#[deprecated(note = "Use alpha_map.serialized_size()")]
-#[no_mangle]
-pub(crate) extern "C" fn alpha_map_get_serialized_size(alpha_map: *const AlphaMap) -> usize {
-    unsafe { &*alpha_map }.serialized_size()
-}
-
-#[deprecated(note = "Use alpha_map.serialize()")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn alpha_map_serialize_bin(
-    alpha_map: *const AlphaMap,
-    mut ptr: NonNull<NonNull<u8>>,
-) {
-    let am = &*alpha_map;
-    let write_area = slice::from_raw_parts_mut(ptr.as_mut().as_ptr(), am.serialized_size());
-    let mut cursor = Cursor::new(write_area);
-    am.serialize(&mut cursor).unwrap();
-    // Move ptr
-    ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
-}
-
 #[deprecated(note = "Use alpha_map.add_range(begin..=end)")]
 #[no_mangle]
 pub extern "C" fn alpha_map_add_range(
@@ -294,7 +240,7 @@ pub(crate) extern "C" fn alpha_map_trie_to_char_str(
     alpha_map: *const AlphaMap,
     str: *const TrieChar,
 ) -> NonNull<AlphaChar> {
-    let str = unsafe { slice::from_raw_parts(str, trie_char_strlen(str)) };
+    let str = trie_char_as_slice(str);
     let am = unsafe { &*alpha_map };
 
     let out: Vec<AlphaChar> = str

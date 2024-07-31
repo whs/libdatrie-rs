@@ -1,13 +1,11 @@
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::{cmp, io};
+use std::io::{Read, Write};
 use std::ptr::NonNull;
-use std::{cmp, io, ptr, slice};
 
-use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::fileutils::wrap_cfile_nonnull;
 use crate::symbols::Symbols;
-use crate::trie_string::{TrieChar, TrieString, TRIE_CHAR_MAX};
+use crate::trie_string::{TRIE_CHAR_MAX, TrieChar, TrieString};
 use crate::types::*;
 
 #[derive(Default, Clone)]
@@ -472,64 +470,6 @@ impl Default for DArray {
             ],
         }
     }
-}
-
-#[deprecated(note = "Use DArray::default()")]
-#[no_mangle]
-pub(crate) extern "C" fn da_new() -> *mut DArray {
-    Box::into_raw(Box::new(DArray::default()))
-}
-
-#[deprecated(note = "Use DArray::read(). Careful about file position on failure!")]
-#[no_mangle]
-pub(crate) extern "C" fn da_fread(file: NonNull<libc::FILE>) -> *mut DArray {
-    let mut file = wrap_cfile_nonnull(file);
-    let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
-
-    match DArray::read(&mut file) {
-        Ok(da) => Box::into_raw(Box::new(da)),
-        Err(_) => {
-            // Return to save_pos if read fail
-            let _ = file.seek(SeekFrom::Start(save_pos));
-            return ptr::null_mut();
-        }
-    }
-}
-
-#[no_mangle]
-pub(crate) unsafe extern "C" fn da_free(mut d: NonNull<DArray>) {
-    drop(Box::from_raw(d.as_mut()))
-}
-
-#[deprecated(note = "Use DArray::serialize()")]
-#[no_mangle]
-pub(crate) extern "C" fn da_fwrite(d: *const DArray, file: NonNull<libc::FILE>) -> i32 {
-    let mut file = wrap_cfile_nonnull(file);
-
-    let da = unsafe { &*d };
-
-    match da.serialize(&mut file) {
-        Ok(_) => 0,
-        Err(_) => -1,
-    }
-}
-
-#[deprecated(note = "Use d.get_serialized_size()")]
-#[no_mangle]
-pub(crate) extern "C" fn da_get_serialized_size(d: *const DArray) -> usize {
-    let da = unsafe { &*d };
-    da.serialized_size()
-}
-
-#[deprecated(note = "Use DArray::serialize()")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn da_serialize(d: *const DArray, mut ptr: NonNull<NonNull<u8>>) {
-    let da = &*d;
-    let write_area = slice::from_raw_parts_mut(ptr.as_mut().as_ptr(), da.serialized_size());
-    let mut cursor = Cursor::new(write_area);
-    da.serialize(&mut cursor).unwrap();
-    // Move ptr
-    ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
 }
 
 #[deprecated(note = "Use d.get_root()")]

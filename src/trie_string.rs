@@ -12,14 +12,8 @@ pub type TrieChar = u8;
 pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 pub const TRIE_CHAR_MAX: TrieChar = TrieChar::MAX;
 
-#[no_mangle]
-pub extern "C" fn trie_char_strlen(key: *const TrieChar) -> usize {
+pub(crate) fn trie_char_strlen(key: *const TrieChar) -> usize {
     unsafe { CStr::from_ptr(key.cast()) }.count_bytes()
-}
-
-#[no_mangle]
-pub extern "C" fn trie_char_strsize(str: *const TrieChar) -> usize {
-    trie_char_strlen(str) * size_of::<TrieChar>()
 }
 
 /// Return a TrieChar string as slice, including the null byte
@@ -36,14 +30,6 @@ pub(crate) fn trie_char_clone(str: *const TrieChar) -> Box<[TrieChar]> {
     let cloned = Vec::from(str_slice);
 
     cloned.into_boxed_slice()
-}
-
-#[no_mangle]
-pub extern "C" fn trie_char_strdup(str: *const TrieChar) -> *mut TrieChar {
-    let str_slice = trie_char_as_slice(str);
-    let cloned = Vec::from(str_slice);
-
-    Box::into_raw(cloned.into_boxed_slice()).cast()
 }
 
 #[derive(Clone, Default, Debug)]
@@ -123,7 +109,7 @@ impl Write for TrieString {
 
 #[deprecated(note = "Use TrieString::default(). Note that it doesn't preallocate!")]
 #[no_mangle]
-pub extern "C" fn trie_string_new(n_elm: i32) -> *mut TrieString {
+pub(crate) extern "C" fn trie_string_new(n_elm: i32) -> *mut TrieString {
     let ts = TrieString {
         inner: Vec::with_capacity(n_elm as usize),
         str_len: 0,
@@ -132,41 +118,41 @@ pub extern "C" fn trie_string_new(n_elm: i32) -> *mut TrieString {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn trie_string_free(ts: *mut TrieString) {
+pub(crate) unsafe extern "C" fn trie_string_free(ts: *mut TrieString) {
     drop(Box::from_raw(ts))
 }
 
 #[deprecated(note = "Use ts.length()")]
 #[no_mangle]
-pub extern "C" fn trie_string_length(ts: *const TrieString) -> i32 {
+pub(crate) extern "C" fn trie_string_length(ts: *const TrieString) -> i32 {
     let str = unsafe { &*ts };
     str.length() as i32
 }
 
 #[deprecated(note = "Use ts.deref()")]
 #[no_mangle]
-pub extern "C" fn trie_string_get_val(ts: *const TrieString) -> *const libc::c_void {
+pub(crate) extern "C" fn trie_string_get_val(ts: *const TrieString) -> *const libc::c_void {
     let str = unsafe { &*ts };
     str.deref().as_ptr().cast()
 }
 
 #[deprecated(note = "Use ts.deref_mut()")]
 #[no_mangle]
-pub extern "C" fn trie_string_get_val_rw(mut ts: NonNull<TrieString>) -> *mut libc::c_void {
+pub(crate) extern "C" fn trie_string_get_val_rw(mut ts: NonNull<TrieString>) -> *mut libc::c_void {
     let str = unsafe { ts.as_mut() };
     str.deref_mut().as_mut_ptr().cast()
 }
 
 #[deprecated(note = "Use ts.clear()")]
 #[no_mangle]
-pub extern "C" fn trie_string_clear(mut ts: NonNull<TrieString>) {
+pub(crate) extern "C" fn trie_string_clear(mut ts: NonNull<TrieString>) {
     let str = unsafe { ts.as_mut() };
     str.clear()
 }
 
 #[deprecated(note = "Use src.clone()")]
 #[no_mangle]
-pub extern "C" fn trie_string_copy(mut dst: NonNull<TrieString>, src: *const TrieString) -> Bool {
+pub(crate) extern "C" fn trie_string_copy(mut dst: NonNull<TrieString>, src: *const TrieString) -> Bool {
     let src = unsafe { &*src };
     let dst = unsafe { dst.as_mut() };
 
@@ -177,7 +163,7 @@ pub extern "C" fn trie_string_copy(mut dst: NonNull<TrieString>, src: *const Tri
 
 #[deprecated(note = "Use dst.append_from_str()")]
 #[no_mangle]
-pub extern "C" fn trie_string_append(mut dst: NonNull<TrieString>, src: *const TrieString) -> Bool {
+pub(crate) extern "C" fn trie_string_append(mut dst: NonNull<TrieString>, src: *const TrieString) -> Bool {
     let src = unsafe { &*src };
     let dst = unsafe { dst.as_mut() };
     dst.append_from_str(src);
@@ -186,7 +172,7 @@ pub extern "C" fn trie_string_append(mut dst: NonNull<TrieString>, src: *const T
 
 #[deprecated(note = "Use dst.append_from_slice()")]
 #[no_mangle]
-pub extern "C" fn trie_string_append_string(
+pub(crate) extern "C" fn trie_string_append_string(
     mut ts: NonNull<TrieString>,
     str: *const TrieChar,
 ) -> Bool {
@@ -202,7 +188,7 @@ pub extern "C" fn trie_string_append_string(
 
 #[deprecated(note = "Use ts.append()")]
 #[no_mangle]
-pub extern "C" fn trie_string_append_char(mut ts: NonNull<TrieString>, tc: TrieChar) -> Bool {
+pub(crate) extern "C" fn trie_string_append_char(mut ts: NonNull<TrieString>, tc: TrieChar) -> Bool {
     let ts = unsafe { ts.as_mut() };
     ts.append(tc);
     TRUE
@@ -210,7 +196,7 @@ pub extern "C" fn trie_string_append_char(mut ts: NonNull<TrieString>, tc: TrieC
 
 #[deprecated(note = "Use ts.ensure_terminated()")]
 #[no_mangle]
-pub extern "C" fn trie_string_terminate(mut ts: NonNull<TrieString>) -> Bool {
+pub(crate) extern "C" fn trie_string_terminate(mut ts: NonNull<TrieString>) -> Bool {
     let ts = unsafe { ts.as_mut() };
     ts.ensure_terminated();
     TRUE
@@ -218,7 +204,7 @@ pub extern "C" fn trie_string_terminate(mut ts: NonNull<TrieString>) -> Bool {
 
 #[deprecated(note = "Use ts.pop()")]
 #[no_mangle]
-pub extern "C" fn trie_string_cut_last(mut ts: NonNull<TrieString>) -> Bool {
+pub(crate) extern "C" fn trie_string_cut_last(mut ts: NonNull<TrieString>) -> Bool {
     let ts = unsafe { ts.as_mut() };
     ts.pop().is_some().into()
 }

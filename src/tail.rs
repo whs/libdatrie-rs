@@ -1,12 +1,10 @@
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use std::ptr::NonNull;
 use std::{io, ptr, slice};
+use std::io::{Read, Write};
+use std::ptr::NonNull;
 
-use ::libc;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::fileutils::wrap_cfile_nonnull;
-use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR};
+use crate::trie::{TRIE_DATA_ERROR, TrieChar, TrieData};
 use crate::trie_string::{trie_char_clone, TRIE_CHAR_TERM};
 use crate::types::*;
 
@@ -271,68 +269,6 @@ impl Default for TailBlock {
             suffix: None,
         }
     }
-}
-
-#[deprecated(note = "Use Tail::default()")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_new() -> *mut Tail {
-    Box::into_raw(Box::new(Tail::default()))
-}
-
-#[deprecated(note = "Use Tail::read(). Careful about file position on failure!")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_fread(file: NonNull<libc::FILE>) -> *mut Tail {
-    let mut file = wrap_cfile_nonnull(file);
-    let save_pos = file.seek(SeekFrom::Current(0)).unwrap();
-
-    match Tail::read(&mut file) {
-        Ok(tail) => Box::into_raw(Box::new(tail)),
-        Err(_) => {
-            // Return to save_pos if read fail
-            let _ = file.seek(SeekFrom::Start(save_pos));
-            return ptr::null_mut();
-        }
-    }
-}
-
-#[no_mangle]
-pub(crate) unsafe extern "C" fn tail_free(t: NonNull<Tail>) {
-    let tail = Box::from_raw(t.as_ptr());
-    drop(tail);
-}
-
-#[deprecated(note = "Use t.serialize()")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_fwrite(t: *const Tail, file: NonNull<libc::FILE>) -> i32 {
-    let tail = unsafe { &*t };
-    let mut file = wrap_cfile_nonnull(file);
-    match tail.serialize(&mut file) {
-        Ok(_) => 0,
-        Err(_) => -1,
-    }
-}
-
-#[deprecated(note = "Use t.serialized_size()")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_get_serialized_size(t: *const Tail) -> usize {
-    let tail = unsafe { &*t };
-    tail.serialized_size()
-}
-
-#[deprecated(note = "Use t.serialize()")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn tail_serialize(
-    t: *const Tail,
-    mut ptr: NonNull<NonNull<u8>>,
-) -> i32 {
-    let tail = &*t;
-    let write_area = slice::from_raw_parts_mut(ptr.as_mut().as_ptr(), tail.serialized_size());
-    let mut cursor = Cursor::new(write_area);
-    tail.serialize(&mut cursor).unwrap();
-    // Move ptr
-    ptr.write(ptr.as_ref().byte_offset(cursor.position() as isize));
-
-    0
 }
 
 #[deprecated(note = "Use t.get_suffix()")]

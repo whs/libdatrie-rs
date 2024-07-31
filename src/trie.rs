@@ -1,42 +1,40 @@
+use std::{io, ptr, slice};
+use std::ffi::{CStr, OsStr};
+use std::fs::File;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
+use std::os::unix::prelude::OsStrExt;
+use std::path::Path;
+use std::ptr::NonNull;
+
+use ::libc;
+
 use crate::alpha_map::{
-    alpha_map_char_to_trie, alpha_map_char_to_trie_str, alpha_map_clone, alpha_map_fread_bin,
-    alpha_map_free, alpha_map_fwrite_bin, alpha_map_get_serialized_size, alpha_map_serialize_bin,
+    alpha_map_char_to_trie, alpha_map_char_to_trie_str
+    ,
     alpha_map_trie_to_char, AlphaMap,
 };
 use crate::darray::{
-    da_first_separate, da_fread, da_free, da_fwrite, da_get_base, da_get_check, da_get_root,
-    da_get_serialized_size, da_insert_branch, da_new, da_next_separate, da_output_symbols,
-    da_prune, da_prune_upto, da_serialize, da_set_base, da_walk, DArray,
+    da_first_separate, da_get_base, da_get_check, da_get_root
+    , da_insert_branch, da_next_separate, da_output_symbols,
+    da_prune, da_prune_upto, da_set_base, da_walk, DArray,
 };
+use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::{
-    tail_add_suffix, tail_delete, tail_fread, tail_free, tail_fwrite, tail_get_data,
-    tail_get_serialized_size, tail_get_suffix, tail_new, tail_serialize, tail_set_data,
-    tail_set_suffix, tail_walk_char, Tail,
+    Tail, tail_add_suffix, tail_delete
+    , tail_get_data, tail_get_suffix,
+    tail_set_data, tail_set_suffix, tail_walk_char,
 };
 use crate::trie_string::{
-    trie_char_strlen, trie_string_free, trie_string_get_val, trie_string_length, trie_string_new,
-    TrieString, TRIE_CHAR_TERM,
+    trie_char_strlen, TRIE_CHAR_TERM, trie_string_free, trie_string_get_val, trie_string_length,
+    trie_string_new, TrieString,
 };
 use crate::types::*;
-use ::libc;
-use std::{io, mem, ptr, slice};
-use std::ffi::{CStr, OsStr};
-use std::fs::{File, OpenOptions};
-use std::os::unix::prelude::OsStrExt;
-use std::path::{Path, PathBuf};
-use std::ptr::NonNull;
-use crate::fileutils::wrap_cfile_nonnull;
 
 extern "C" {
     fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
-    fn fclose(__stream: *mut FILE) -> libc::c_int;
-    fn fopen(_: *const libc::c_char, _: *const libc::c_char) -> *mut FILE;
 }
 pub type size_t = libc::c_ulong;
-pub type uint8 = libc::c_uchar;
-pub type FILE = libc::FILE;
 
 pub type TrieChar = u8;
 
@@ -210,7 +208,7 @@ pub extern "C" fn trie_serialize(mut trie: NonNull<Trie>, ptr: *mut u8) {
 
 #[deprecated(note="Use trie.serialize()")]
 #[no_mangle]
-pub extern "C" fn trie_fwrite(mut trie: NonNull<Trie>, file: NonNull<FILE>) -> i32 {
+pub extern "C" fn trie_fwrite(mut trie: NonNull<Trie>, file: NonNull<libc::FILE>) -> i32 {
     let trie = unsafe { trie.as_mut() };
     let mut file = wrap_cfile_nonnull(file);
     match trie.serialize(&mut file) {
