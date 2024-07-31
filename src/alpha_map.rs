@@ -140,11 +140,25 @@ impl AlphaMap {
         None
     }
 
+    pub(crate) fn char_to_trie_str(&self, str: &[AlphaChar]) -> Option<Vec<TrieChar>> {
+        str.iter()
+            .map(|v| self.char_to_trie(*v).map(|v| v as TrieChar))
+            .chain(iter::once(Some(TRIE_CHAR_TERM)))
+            .collect()
+    }
+
     pub(crate) fn trie_to_char(&self, tc: TrieChar) -> AlphaChar {
         self.trie_to_alpha_map
             .get(tc as usize)
             .copied()
             .unwrap_or(ALPHA_CHAR_ERROR)
+    }
+
+    pub(crate) fn trie_to_char_str(&self, str: &[TrieChar]) -> Vec<AlphaChar> {
+        str.iter()
+            .map(|chr| self.trie_to_char(*chr))
+            .chain(iter::once(0))
+            .collect()
     }
 }
 
@@ -214,13 +228,7 @@ pub(crate) extern "C" fn alpha_map_char_to_trie_str(
     let str = unsafe { slice::from_raw_parts(str, alpha_char_strlen(str) as usize) };
     let am = unsafe { &*alpha_map };
 
-    let out_vec: Option<Vec<TrieChar>> = str
-        .iter()
-        .map(|v| am.char_to_trie(*v).map(|v| v as TrieChar))
-        .chain(iter::once(Some(TRIE_CHAR_TERM)))
-        .collect();
-
-    match out_vec {
+    match am.char_to_trie_str(str) {
         Some(v) => Box::into_raw(v.into_boxed_slice()).cast(),
         None => ptr::null_mut(),
     }
@@ -230,15 +238,11 @@ pub(crate) extern "C" fn alpha_map_char_to_trie_str(
 pub(crate) extern "C" fn alpha_map_trie_to_char_str(
     alpha_map: *const AlphaMap,
     str: *const TrieChar,
-) -> NonNull<AlphaChar> {
+) -> *mut AlphaChar {
     let str = trie_char_as_slice(str);
     let am = unsafe { &*alpha_map };
 
-    let out: Vec<AlphaChar> = str
-        .iter()
-        .map(|chr| am.trie_to_char(*chr))
-        .chain(iter::once(0))
-        .collect();
+    let out = am.trie_to_char_str(str);
 
-    unsafe { NonNull::new_unchecked(Box::into_raw(out.into_boxed_slice()).cast()) }
+    Box::into_raw(out.into_boxed_slice()).cast()
 }

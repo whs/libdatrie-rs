@@ -105,6 +105,10 @@ impl Trie {
         self.is_dirty.get()
     }
 
+    // fn store_conditionally(&mut self, key: &[AlphaChar], data: TrieData, is_overwrite: bool) -> bool {
+    //
+    // }
+
     pub fn retrieve(&self, key: &[AlphaChar]) -> Option<TrieData> {
         // walk through branches
         let mut s = self.da.get_root();
@@ -331,7 +335,7 @@ pub unsafe extern "C" fn trie_store(
     mut key: *const AlphaChar,
     mut data: TrieData,
 ) -> Bool {
-    return trie_store_conditionally(trie, key, data, TRUE as Bool);
+    return trie_store_conditionally(trie, key, data, true);
 }
 
 #[no_mangle]
@@ -340,76 +344,70 @@ pub unsafe extern "C" fn trie_store_if_absent(
     mut key: *const AlphaChar,
     mut data: TrieData,
 ) -> Bool {
-    return trie_store_conditionally(trie, key, data, FALSE as Bool);
+    return trie_store_conditionally(trie, key, data, false);
 }
 
-unsafe extern "C" fn trie_store_conditionally(
+unsafe fn trie_store_conditionally(
     mut trie: *mut Trie,
     mut key: *const AlphaChar,
-    mut data: TrieData,
-    mut is_overwrite: Bool,
+    data: TrieData,
+    is_overwrite: bool,
 ) -> Bool {
     let trie = unsafe { &mut *trie };
-    let mut s: TrieIndex = 0;
-    let mut t: TrieIndex = 0;
-    let mut suffix_idx: libc::c_short = 0;
-    let mut p: *const AlphaChar = 0 as *const AlphaChar;
-    let mut sep: *const AlphaChar = 0 as *const AlphaChar;
-    s = da_get_root(&trie.da);
-    p = key;
-    while !(da_get_base(&trie.da, s) < 0 as libc::c_int) {
-        let mut tc: TrieIndex = alpha_map_char_to_trie(&trie.alpha_map, *p);
-        if TRIE_INDEX_MAX == tc {
-            return FALSE as Bool;
+    let key_slice = alpha_char_as_slice(key);
+
+    // walk through branches
+    let mut s = trie.da.get_root();
+    let mut p = key;
+    while !trie.da.is_separate(s) {
+        let Some(mut tc) = trie.alpha_map.char_to_trie(*p) else {
+            return FALSE;
+        };
+        if let Some(next_s) = trie.da.walk(s, tc as TrieChar) {
+            s = next_s;
+        } else {
+            // TODO: alpha_char_as_slice is not needed if we use key_slice and not p
+            let Some(key_str) = trie.alpha_map.char_to_trie_str(alpha_char_as_slice(p)) else {
+                return FALSE;
+            };
+            return trie.branch_in_branch(s, &key_str, data).into();
         }
-        if !da_walk(&trie.da, &mut s, tc as TrieChar) {
-            let mut key_str: *mut TrieChar = 0 as *mut TrieChar;
-            let mut res: Bool = DA_FALSE;
-            key_str = alpha_map_char_to_trie_str(&trie.alpha_map, p);
-            if key_str.is_null() {
-                return FALSE as Bool;
-            }
-            res = trie_branch_in_branch(trie.into(), s, key_str, data);
-            free(key_str as *mut libc::c_void);
-            return res;
-        }
-        if 0 as libc::c_int as AlphaChar == *p {
+        if *p == 0 {
             break;
         }
         p = p.offset(1);
-        p;
     }
-    sep = p;
-    t = -da_get_base(&trie.da, s);
-    suffix_idx = 0 as libc::c_int as libc::c_short;
+
+    // walk through tail
+    let sep = p;
+    let t = -trie.da.get_tail_index(s);
+    let mut suffix_idx = 0;
     loop {
-        let mut tc_0: TrieIndex = alpha_map_char_to_trie(&trie.alpha_map, *p);
-        if TRIE_INDEX_MAX == tc_0 {
-            return FALSE as Bool;
+        let Some(mut tc) = trie.alpha_map.char_to_trie(*p) else {
+            return FALSE;
+        };
+        if let Some(next_idx) = trie.tail.walk_char(t, suffix_idx, tc as TrieChar) {
+            suffix_idx = next_idx;
+        } else {
+            // TODO: alpha_char_as_slice is not needed if we use key_slice and not p
+            let Some(tail_str) = trie.alpha_map.char_to_trie_str(alpha_char_as_slice(sep)) else {
+                return FALSE;
+            };
+            return trie.branch_in_tail(s, &tail_str, data).into();
         }
-        if !tail_walk_char(&trie.tail, t, &mut suffix_idx, tc_0 as TrieChar) {
-            let mut tail_str: *mut TrieChar = 0 as *mut TrieChar;
-            let mut res_0: Bool = DA_FALSE;
-            tail_str = alpha_map_char_to_trie_str(&trie.alpha_map, sep);
-            if tail_str.is_null() {
-                return FALSE as Bool;
-            }
-            res_0 = trie_branch_in_tail(trie.into(), s, tail_str, data);
-            free(tail_str as *mut libc::c_void);
-            return res_0;
-        }
-        if 0 as libc::c_int as AlphaChar == *p {
+        if *p == 0 {
             break;
         }
         p = p.offset(1);
-        p;
     }
+
+    // duplicated, overwrite val if flagged
     if !is_overwrite {
-        return FALSE as Bool;
+        return FALSE;
     }
-    tail_set_data((&mut trie.tail).into(), t, data);
+    trie.tail.set_data(t, Some(data));
     trie.is_dirty.set(true);
-    return TRUE as Bool;
+    TRUE
 }
 
 #[deprecated(note = "Use trie.branch_in_branch()")]
