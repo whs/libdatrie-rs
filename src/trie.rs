@@ -104,6 +104,36 @@ impl Trie {
     pub fn is_dirty(&self) -> bool {
         self.is_dirty.get()
     }
+
+    pub fn retrieve(&self, key: &[AlphaChar]) -> Option<TrieData> {
+        // walk through branches
+        let mut s = self.da.get_root();
+        let mut p = 0;
+        while !self.da.is_separate(s) {
+            let tc = self.alpha_map.char_to_trie(key[p])?;
+            s = self.da.walk(s, tc as TrieChar)?;
+            if key[p] == 0 {
+                break;
+            }
+            p += 1;
+        }
+
+        // walk through tail
+        s = self.da.get_tail_index(s);
+        let mut suffix_idx = 0;
+        loop {
+            let tc = self.alpha_map.char_to_trie(key[p])?;
+            suffix_idx = self.tail.walk_char(s, suffix_idx, tc as TrieChar)?;
+            if key[p] == 0 {
+                break;
+            }
+            p += 1;
+        }
+
+        // found
+        // unwrap as an assertion since this should never fail
+        Some(self.tail.get_data(s as usize).unwrap())
+    }
 }
 
 pub type TrieEnumFunc =
@@ -218,52 +248,17 @@ pub extern "C" fn trie_retrieve(
     let trie = unsafe { &*trie };
     let key_slice = alpha_char_as_slice(key);
 
-    // walk through branches
-    let mut s = trie.da.get_root();
-    let mut p = 0;
-    while !trie.da.is_separate(s) {
-        let mut tc: TrieIndex = trie.alpha_map.char_to_trie(key_slice[p]).unwrap_or(TRIE_INDEX_MAX);
-        if TRIE_INDEX_MAX == tc {
-            return FALSE;
-        }
-        if let Some(new_s) = trie.da.walk(s, tc as TrieChar) {
-            s = new_s;
-        } else {
-            return FALSE;
-        }
-        if key_slice[p] == 0 {
-            break;
-        }
-        p += 1;
+    match trie.retrieve(key_slice) {
+        Some(v) => {
+            if !o_data.is_null(){
+                unsafe {
+                    o_data.write(v);
+                }
+            }
+            TRUE
+        },
+        None => FALSE
     }
-
-    // walk through tail
-    s = trie.da.get_tail_index(s);
-    let mut suffix_idx = 0;
-    loop {
-        let mut tc: TrieIndex = trie.alpha_map.char_to_trie(key_slice[p]).unwrap_or(TRIE_INDEX_MAX);
-        if TRIE_INDEX_MAX == tc {
-            return FALSE;
-        }
-        if let Some(new_idx) = trie.tail.walk_char(s, suffix_idx, tc as TrieChar) {
-            suffix_idx = new_idx;
-        } else {
-            return FALSE;
-        }
-        if key_slice[p] == 0 {
-            break;
-        }
-        p += 1;
-    }
-
-    // found
-    if !o_data.is_null() {
-        unsafe {
-            o_data.write(trie.tail.get_data(s as usize).unwrap());
-        }
-    }
-
-    TRUE
 }
 
 #[no_mangle]
