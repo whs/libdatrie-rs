@@ -1,4 +1,4 @@
-use std::io::{BufReader, Read};
+use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use crate::alpha_map::{
     alpha_map_char_to_trie, alpha_map_char_to_trie_str, alpha_map_clone, alpha_map_fread_bin,
     alpha_map_free, alpha_map_fwrite_bin, alpha_map_get_serialized_size, alpha_map_serialize_bin,
@@ -20,7 +20,7 @@ use crate::trie_string::{
 };
 use crate::types::*;
 use ::libc;
-use std::{io, mem, ptr};
+use std::{io, mem, ptr, slice};
 use std::ffi::{CStr, OsStr};
 use std::fs::{File, OpenOptions};
 use std::os::unix::prelude::OsStrExt;
@@ -83,6 +83,18 @@ impl Trie {
             tail: Box::into_raw(Box::new(tail)),
             is_dirty: FALSE,
         })
+    }
+
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+        let mut fp = BufWriter::new(File::create(path)?);
+        self.serialize(&mut fp)
+    }
+
+    pub fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
+        unsafe { &*self.alpha_map }.serialize(writer)?;
+        unsafe { &*self.da }.serialize(writer)?;
+        unsafe { &*self.tail }.serialize(writer)
+        // TODO: is_dirty = FALSE
     }
 
     /// Returns size that would be occupied by a trie if it was
@@ -164,51 +176,47 @@ pub unsafe extern "C" fn trie_free(trie: *mut Trie) {
     drop(Box::from_raw(trie))
 }
 
+#[deprecated(note="Use trie.save()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_save(
-    mut trie: *mut Trie,
-    mut path: *const libc::c_char,
-) -> libc::c_int {
-    let mut file: *mut FILE = 0 as *mut FILE;
-    let mut res: libc::c_int = 0 as libc::c_int;
-    file = fopen(path, b"wb+\0" as *const u8 as *const libc::c_char);
-    if file.is_null() {
-        return -(1 as libc::c_int);
+pub extern "C" fn trie_save(
+    mut trie: NonNull<Trie>,
+    path: *const libc::c_char,
+) -> i32 {
+    let trie = unsafe { trie.as_mut() };
+    let str = unsafe { CStr::from_ptr(path) };
+    let osstr = OsStr::from_bytes(str.to_bytes());
+    match trie.save(osstr) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    res = trie_fwrite(trie, NonNull::new_unchecked(file));
-    fclose(file);
-    return res;
 }
 
 #[deprecated(note = "Use trie.serialized_size()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_get_serialized_size(trie: *const Trie) -> usize {
+pub extern "C" fn trie_get_serialized_size(trie: *const Trie) -> usize {
     let trie = unsafe { &*trie };
     trie.serialized_size()
 }
 
+#[deprecated(note="Use trie.serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_serialize(mut trie: *mut Trie, mut ptr: *mut u8) {
-    let mut ptr1: *mut uint8 = ptr;
-    alpha_map_serialize_bin((*trie).alpha_map, mem::transmute(&mut ptr1));
-    da_serialize((*trie).da, mem::transmute(&mut ptr1));
-    tail_serialize((*trie).tail, mem::transmute(&mut ptr1));
-    (*trie).is_dirty = FALSE as Bool;
+pub extern "C" fn trie_serialize(mut trie: NonNull<Trie>, ptr: *mut u8) {
+    // Seems that this doesn't actually move the pointer?
+    let trie = unsafe { trie.as_mut() };
+    let slice = unsafe { slice::from_raw_parts_mut(ptr, trie.serialized_size()) };
+    let mut cursor = Cursor::new(slice);
+    trie.serialize(&mut cursor).unwrap();
 }
 
+#[deprecated(note="Use trie.serialize()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_fwrite(mut trie: *mut Trie, mut file: NonNull<FILE>) -> libc::c_int {
-    if alpha_map_fwrite_bin((*trie).alpha_map, file) != 0 as libc::c_int {
-        return -(1 as libc::c_int);
+pub extern "C" fn trie_fwrite(mut trie: NonNull<Trie>, file: NonNull<FILE>) -> i32 {
+    let trie = unsafe { trie.as_mut() };
+    let mut file = wrap_cfile_nonnull(file);
+    match trie.serialize(&mut file) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    if da_fwrite((*trie).da, file) != 0 as libc::c_int {
-        return -(1 as libc::c_int);
-    }
-    if tail_fwrite((*trie).tail, file) != 0 as libc::c_int {
-        return -(1 as libc::c_int);
-    }
-    (*trie).is_dirty = FALSE as Bool;
-    return 0 as libc::c_int;
 }
 
 #[deprecated(note = "Use trie.is_dirty()")]
