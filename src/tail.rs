@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 use std::ptr::NonNull;
-use std::{io, ptr, slice};
+use std::{io, ptr};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR};
-use crate::trie_string::{trie_char_clone, TRIE_CHAR_TERM};
+use crate::trie_string::TRIE_CHAR_TERM;
 use crate::types::*;
 
 #[derive(Default)]
@@ -281,53 +281,11 @@ pub(crate) extern "C" fn tail_get_suffix(t: *const Tail, index: TrieIndex) -> *c
     }
 }
 
-#[deprecated(note = "Use tail.set_suffix()")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_set_suffix(
-    mut t: NonNull<Tail>,
-    index: TrieIndex,
-    suffix: *const TrieChar,
-) -> Bool {
-    let tail = unsafe { t.as_mut() };
-    let suffix = unsafe { suffix.as_ref() }.map(|v| trie_char_clone(v));
-    tail.set_suffix(index, suffix).into()
-}
-
-#[deprecated(note = "Clone the input into Rust and use tail.add_suffix().")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn tail_add_suffix(
-    mut t: NonNull<Tail>,
-    suffix: *const TrieChar,
-) -> TrieIndex {
-    let tail = t.as_mut();
-    let suffix = unsafe { suffix.as_ref() }.map(|v| trie_char_clone(v));
-
-    tail.add_suffix(suffix)
-}
-
 #[deprecated(note = "Use t.get_data().unwrap_or(TRIE_DATA_ERROR)")]
 #[no_mangle]
 pub(crate) extern "C" fn tail_get_data(t: *const Tail, index: TrieIndex) -> TrieData {
     let tail = unsafe { &*t };
-    match tail.get_data(index) {
-        Some(v) => v,
-        None => TRIE_DATA_ERROR,
-    }
-}
-
-#[deprecated(note = "Use t.set_data()")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_set_data(
-    mut t: NonNull<Tail>,
-    index: TrieIndex,
-    data: TrieData,
-) -> Bool {
-    let tail = unsafe { t.as_mut() };
-    let data = match data {
-        TRIE_DATA_ERROR => None,
-        v => Some(v),
-    };
-    tail.set_data(index, data).is_some().into()
+    tail.get_data(index).unwrap_or(TRIE_DATA_ERROR)
 }
 
 /// Delete suffix entry from the tail data.
@@ -336,28 +294,6 @@ pub(crate) extern "C" fn tail_set_data(
 pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
     let tail = unsafe { t.as_mut() };
     tail.delete(index)
-}
-
-/// Walk in tail with a string
-///
-/// Walk in the tail data `t` at entry `s`, from given character position
-/// `*suffix_idx`, using `len` characters of given string `str`. On return,
-/// `*suffix_idx` is updated to the position after the last successful walk,
-/// and the function returns the total number of character successfully walked.
-#[deprecated(note = "Use (*suffix_idx, walked) = t.walk_str()")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn tail_walk_str(
-    t: *const Tail,
-    s: TrieIndex,
-    suffix_idx: *mut i16,
-    str: *const TrieChar,
-    len: i32,
-) -> i32 {
-    let tail = unsafe { &*t };
-    let str = slice::from_raw_parts(str, len as usize);
-    let (idx, walked) = tail.walk_str(s, *suffix_idx, str);
-    *suffix_idx = idx;
-    walked
 }
 
 /// Walk in tail with a character

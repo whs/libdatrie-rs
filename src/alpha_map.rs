@@ -1,12 +1,12 @@
+use std::{io, iter, ptr};
 use std::io::{Read, Write};
 use std::ops::RangeInclusive;
 use std::ptr::NonNull;
-use std::{io, iter, ptr, slice};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
-use crate::trie_string::{trie_char_as_slice, TrieChar, TRIE_CHAR_TERM};
+use crate::trie_string::{TRIE_CHAR_TERM, TrieChar};
 use crate::types::*;
 
 #[derive(Clone, Default)]
@@ -218,31 +218,4 @@ pub(crate) extern "C" fn alpha_map_trie_to_char(
     tc: TrieChar,
 ) -> AlphaChar {
     (unsafe { &*alpha_map }).trie_to_char(tc)
-}
-
-#[no_mangle]
-pub(crate) extern "C" fn alpha_map_char_to_trie_str(
-    alpha_map: *const AlphaMap,
-    str: *const AlphaChar,
-) -> *mut TrieChar {
-    let str = unsafe { slice::from_raw_parts(str, alpha_char_strlen(str) as usize) };
-    let am = unsafe { &*alpha_map };
-
-    match am.char_to_trie_str(str) {
-        Some(v) => Box::into_raw(v.into_boxed_slice()).cast(),
-        None => ptr::null_mut(),
-    }
-}
-
-#[no_mangle]
-pub(crate) extern "C" fn alpha_map_trie_to_char_str(
-    alpha_map: *const AlphaMap,
-    str: *const TrieChar,
-) -> *mut AlphaChar {
-    let str = trie_char_as_slice(str);
-    let am = unsafe { &*alpha_map };
-
-    let out = am.trie_to_char_str(str);
-
-    Box::into_raw(out.into_boxed_slice()).cast()
 }

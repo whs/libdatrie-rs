@@ -512,13 +512,6 @@ pub(crate) extern "C" fn da_set_base(mut d: NonNull<DArray>, s: TrieIndex, val: 
     let _ = da.set_base(s, val);
 }
 
-#[deprecated(note = "Use d.set_check() and ignore error")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn da_set_check(mut d: NonNull<DArray>, s: TrieIndex, val: TrieIndex) {
-    let da = unsafe { d.as_mut() };
-    let _ = da.set_check(s, val);
-}
-
 #[deprecated(note = "Use Some(*s) = d.walk(s, c)")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool {
@@ -532,17 +525,6 @@ pub(crate) unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: 
     FALSE
 }
 
-#[deprecated(note = "Use d.insert_branch(s, c).unwrap_or(TRIE_INDEX_ERROR)")]
-#[no_mangle]
-pub(crate) extern "C" fn da_insert_branch(
-    mut d: NonNull<DArray>,
-    s: TrieIndex,
-    c: TrieChar,
-) -> TrieIndex {
-    let da = unsafe { d.as_mut() };
-    da.insert_branch(s, c).unwrap_or(TRIE_INDEX_ERROR)
-}
-
 #[deprecated(note = "Use d.output_symbols()")]
 pub(crate) unsafe fn da_output_symbols(d: *const DArray, s: TrieIndex) -> Symbols {
     let da = unsafe { &*d };
@@ -554,13 +536,6 @@ pub(crate) unsafe fn da_output_symbols(d: *const DArray, s: TrieIndex) -> Symbol
 pub(crate) extern "C" fn da_prune(mut d: NonNull<DArray>, s: TrieIndex) {
     let da = unsafe { d.as_mut() };
     da.prune(s)
-}
-
-#[deprecated(note = "Use d.prune_upto()")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn da_prune_upto(mut d: NonNull<DArray>, p: TrieIndex, s: TrieIndex) {
-    let da = unsafe { d.as_mut() };
-    da.prune_upto(p, s)
 }
 
 #[deprecated(note = "Use d.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
