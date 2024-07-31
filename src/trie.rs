@@ -5,7 +5,7 @@ use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::{io, ptr, slice};
+use std::{io, iter, ptr, slice};
 
 use ::libc;
 
@@ -108,24 +108,26 @@ impl Trie {
     pub fn retrieve(&self, key: &[AlphaChar]) -> Option<TrieData> {
         // walk through branches
         let mut s = self.da.get_root();
-        let mut p = 0;
-        for ch in key.iter().copied() {
+        let mut key_iter = key.iter().copied();
+        let mut last_ch = ALPHA_CHAR_ERROR;
+        while let Some(ch) = key_iter.next() {
+            last_ch = ch;
             if self.da.is_separate(s) {
                 break;
             }
             let tc = self.alpha_map.char_to_trie(ch)?;
             s = self.da.walk(s, tc as TrieChar)?;
-            if key[p] == 0 {
+            if ch == 0 {
                 break;
             }
-            p += 1;
         }
 
         // walk through tail
         s = self.da.get_tail_index(s);
         let mut suffix_idx = 0;
-        for p in key.iter().skip(p).copied() {
-            let tc = self.alpha_map.char_to_trie(p)?;
+        // start iterating from the last character
+        for ch in iter::once(last_ch).chain(key_iter) {
+            let tc = self.alpha_map.char_to_trie(ch)?;
             suffix_idx = self.tail.walk_char(s, suffix_idx, tc as TrieChar)?;
         }
 
