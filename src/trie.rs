@@ -210,19 +210,19 @@ pub extern "C" fn trie_is_dirty(trie: *const Trie) -> Bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn trie_retrieve(
+pub extern "C" fn trie_retrieve(
     trie: *const Trie,
-    mut key: *const AlphaChar,
+    key: *const AlphaChar,
     o_data: *mut TrieData,
 ) -> Bool {
     let trie = unsafe { &*trie };
+    let key_slice = alpha_char_as_slice(key);
 
     // walk through branches
     let mut s = trie.da.get_root();
-    // need to walk over p as [u8]
-    let mut p = key;
+    let mut p = 0;
     while !trie.da.is_separate(s) {
-        let mut tc: TrieIndex = trie.alpha_map.char_to_trie(*p).unwrap_or(TRIE_INDEX_MAX);
+        let mut tc: TrieIndex = trie.alpha_map.char_to_trie(key_slice[p]).unwrap_or(TRIE_INDEX_MAX);
         if TRIE_INDEX_MAX == tc {
             return FALSE;
         }
@@ -231,17 +231,17 @@ pub unsafe extern "C" fn trie_retrieve(
         } else {
             return FALSE;
         }
-        if *p == 0 {
+        if key_slice[p] == 0 {
             break;
         }
-        p = p.offset(1);
+        p += 1;
     }
 
     // walk through tail
     s = trie.da.get_tail_index(s);
     let mut suffix_idx = 0;
     loop {
-        let mut tc: TrieIndex = trie.alpha_map.char_to_trie(*p).unwrap_or(TRIE_INDEX_MAX);
+        let mut tc: TrieIndex = trie.alpha_map.char_to_trie(key_slice[p]).unwrap_or(TRIE_INDEX_MAX);
         if TRIE_INDEX_MAX == tc {
             return FALSE;
         }
@@ -250,15 +250,17 @@ pub unsafe extern "C" fn trie_retrieve(
         } else {
             return FALSE;
         }
-        if *p == 0 {
+        if key_slice[p] == 0 {
             break;
         }
-        p = p.offset(1);
+        p += 1;
     }
 
     // found
     if !o_data.is_null() {
-        o_data.write(trie.tail.get_data(s as usize).unwrap());
+        unsafe {
+            o_data.write(trie.tail.get_data(s as usize).unwrap());
+        }
     }
 
     TRUE
