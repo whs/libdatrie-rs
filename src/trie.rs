@@ -109,8 +109,11 @@ impl Trie {
         // walk through branches
         let mut s = self.da.get_root();
         let mut p = 0;
-        while !self.da.is_separate(s) {
-            let tc = self.alpha_map.char_to_trie(key[p])?;
+        for ch in key.iter().copied() {
+            if self.da.is_separate(s) {
+                break;
+            }
+            let tc = self.alpha_map.char_to_trie(ch)?;
             s = self.da.walk(s, tc as TrieChar)?;
             if key[p] == 0 {
                 break;
@@ -121,13 +124,9 @@ impl Trie {
         // walk through tail
         s = self.da.get_tail_index(s);
         let mut suffix_idx = 0;
-        loop {
-            let tc = self.alpha_map.char_to_trie(key[p])?;
+        for p in key.iter().skip(p).copied() {
+            let tc = self.alpha_map.char_to_trie(p)?;
             suffix_idx = self.tail.walk_char(s, suffix_idx, tc as TrieChar)?;
-            if key[p] == 0 {
-                break;
-            }
-            p += 1;
         }
 
         // found
@@ -250,14 +249,14 @@ pub extern "C" fn trie_retrieve(
 
     match trie.retrieve(key_slice) {
         Some(v) => {
-            if !o_data.is_null(){
+            if !o_data.is_null() {
                 unsafe {
                     o_data.write(v);
                 }
             }
             TRUE
-        },
-        None => FALSE
+        }
+        None => FALSE,
     }
 }
 
