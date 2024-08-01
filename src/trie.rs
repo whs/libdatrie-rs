@@ -1,3 +1,4 @@
+use std::{cmp, io, iter, ptr, slice};
 use std::cell::Cell;
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
@@ -5,17 +6,15 @@ use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::{cmp, io, iter, ptr, slice};
 
 use ::libc;
 
-use crate::alpha_map::{alpha_map_trie_to_char, AlphaMap};
+use crate::alpha_map::AlphaMap;
 use crate::darray::{da_first_separate, da_get_base, da_next_separate, DArray};
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::tail::{tail_get_data, tail_get_suffix, Tail};
+use crate::tail::{Tail, tail_get_data};
 use crate::trie_string::{
-    trie_char_strlen, trie_string_free, trie_string_get_val, trie_string_length, trie_string_new,
-    TrieString, TRIE_CHAR_TERM,
+    TRIE_CHAR_TERM, TrieString,
 };
 use crate::types::*;
 
@@ -688,12 +687,44 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
             key: TrieString::default(),
         }
     }
+
+    pub fn key(&self) -> Option<Vec<AlphaChar>> {
+        let state = &self.state?;
+
+        let mut tail_str;
+        let mut out = Vec::new();
+
+        // if state in tail, root == state
+        if state.is_suffix {
+            tail_str = state.trie.tail.get_suffix(state.index)?;
+            tail_str = &tail_str[(state.suffix_idx as usize)..];
+        } else {
+            let tail_idx = state.trie.da.get_tail_index(state.index);
+            tail_str = state.trie.tail.get_suffix(tail_idx)?;
+
+            out.extend(
+                self.key
+                    .iter()
+                    .map(|ch| state.trie.alpha_map.trie_to_char(*ch)),
+            )
+        }
+
+        out.extend(tail_str.iter().map_while(|ch| {
+            if *ch == TRIE_CHAR_TERM {
+                return None;
+            }
+            Some(state.trie.alpha_map.trie_to_char(*ch))
+        }));
+        out.push(0);
+
+        Some(out)
+    }
 }
 
-#[deprecated(note="Use TrieIterator::new()")]
+#[deprecated(note = "Use TrieIterator::new()")]
 #[no_mangle]
 pub extern "C" fn trie_iterator_new(s: NonNull<TrieState>) -> *mut TrieIterator {
-    let i =  TrieIterator::new(unsafe {s.as_ref()});
+    let i = TrieIterator::new(unsafe { s.as_ref() });
     Box::into_raw(Box::new(i))
 }
 
@@ -713,11 +744,7 @@ pub unsafe extern "C" fn trie_iterator_next(mut iter: *mut TrieIterator) -> Bool
             return TRUE as Bool;
         }
         (*iter).key = TrieString::default();
-        sep = da_first_separate(
-            &(*(*s).trie).da,
-            (*s).index,
-            (&mut (*iter).key).into(),
-        );
+        sep = da_first_separate(&(*(*s).trie).da, (*s).index, (&mut (*iter).key).into());
         if TRIE_INDEX_ERROR == sep {
             return FALSE as Bool;
         }
@@ -739,69 +766,17 @@ pub unsafe extern "C" fn trie_iterator_next(mut iter: *mut TrieIterator) -> Bool
     (*s).index = sep;
     return TRUE as Bool;
 }
+
+#[deprecated(note = "Use iter.key()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_iterator_get_key(mut iter: *const TrieIterator) -> *mut AlphaChar {
-    let mut s: *const TrieState = 0 as *const TrieState;
-    let mut tail_str: *const TrieChar = 0 as *const TrieChar;
-    let mut alpha_key: *mut AlphaChar = 0 as *mut AlphaChar;
-    let mut alpha_p: *mut AlphaChar = 0 as *mut AlphaChar;
-    s = (*iter).state.as_ref().map_or(ptr::null(), |v| v);
-    if s.is_null() {
-        return NULL as *mut AlphaChar;
+pub extern "C" fn trie_iterator_get_key(iter: *const TrieIterator) -> *mut AlphaChar {
+    let iter = unsafe { &*iter };
+    match iter.key() {
+        Some(key) => Box::into_raw(key.into_boxed_slice()).cast(),
+        None => ptr::null_mut(),
     }
-    if !!(*s).is_suffix {
-        tail_str = tail_get_suffix(&(*(*s).trie).tail, (*s).index);
-        if tail_str.is_null() {
-            return NULL as *mut AlphaChar;
-        }
-        tail_str = tail_str.offset((*s).suffix_idx as libc::c_int as isize);
-        alpha_key = malloc(
-            (::core::mem::size_of::<AlphaChar>() as libc::c_ulong).wrapping_mul(
-                (trie_char_strlen(tail_str) as size_t).wrapping_add(1 as libc::c_int as size_t),
-            ),
-        ) as *mut AlphaChar;
-        alpha_p = alpha_key;
-    } else {
-        let mut tail_idx: TrieIndex = 0;
-        let mut i: libc::c_int = 0;
-        let mut key_len: libc::c_int = 0;
-        let mut key_p: *const TrieChar = 0 as *const TrieChar;
-        tail_idx = -da_get_base(&(*(*s).trie).da, (*s).index);
-        tail_str = tail_get_suffix(&(*(*s).trie).tail, tail_idx);
-        if tail_str.is_null() {
-            return NULL as *mut AlphaChar;
-        }
-        key_len = trie_string_length(&(*iter).key);
-        key_p = trie_string_get_val(&(*iter).key) as *const TrieChar;
-        alpha_key = malloc(
-            (::core::mem::size_of::<AlphaChar>() as libc::c_ulong).wrapping_mul(
-                (key_len as size_t)
-                    .wrapping_add(trie_char_strlen(tail_str) as size_t)
-                    .wrapping_add(1 as libc::c_int as size_t),
-            ),
-        ) as *mut AlphaChar;
-        alpha_p = alpha_key;
-        i = key_len;
-        while i > 0 as libc::c_int {
-            let fresh0 = key_p;
-            key_p = key_p.offset(1);
-            let fresh1 = alpha_p;
-            alpha_p = alpha_p.offset(1);
-            *fresh1 = alpha_map_trie_to_char(&(*(*s).trie).alpha_map, *fresh0);
-            i -= 1;
-            i;
-        }
-    }
-    while TRIE_CHAR_TERM != *tail_str {
-        let fresh2 = tail_str;
-        tail_str = tail_str.offset(1);
-        let fresh3 = alpha_p;
-        alpha_p = alpha_p.offset(1);
-        *fresh3 = alpha_map_trie_to_char(&(*(*s).trie).alpha_map, *fresh2);
-    }
-    *alpha_p = 0 as libc::c_int as AlphaChar;
-    return alpha_key;
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_iterator_get_data(mut iter: *const TrieIterator) -> TrieData {
     let mut s: *const TrieState = (*iter).state.as_ref().map_or(ptr::null(), |v| v);
