@@ -1,4 +1,4 @@
-use std::{io, iter, ptr, slice};
+use std::{cmp, io, iter, ptr, slice};
 use std::cell::Cell;
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
@@ -11,7 +11,7 @@ use ::libc;
 
 use crate::alpha_map::{alpha_map_trie_to_char, AlphaMap};
 use crate::darray::{
-    da_first_separate, da_get_base, da_next_separate, da_output_symbols, da_walk, DArray,
+    da_first_separate, da_get_base, da_next_separate, da_walk, DArray,
 };
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::{Tail, tail_get_data, tail_get_suffix};
@@ -559,6 +559,23 @@ impl<'a> TrieState<'a> {
         }
     }
 
+    pub fn walkable_chars(&self) -> Vec<AlphaChar> {
+        if !self.is_suffix {
+            self.trie
+                .da
+                .output_symbols(self.index)
+                .iter()
+                .map(|tc| self.trie.alpha_map.trie_to_char(*tc))
+                .collect()
+        } else {
+            let suffix = self.trie.tail.get_suffix(self.index).unwrap();
+            vec![self
+                .trie
+                .alpha_map
+                .trie_to_char(suffix[self.suffix_idx as usize])]
+        }
+    }
+
     pub fn is_single(&self) -> bool {
         self.is_suffix
     }
@@ -607,32 +624,22 @@ pub extern "C" fn trie_state_is_walkable(s: *const TrieState, c: AlphaChar) -> B
     state.is_walkable(c).into()
 }
 
+#[deprecated(note = "Use chars = s.walkable_chars()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_state_walkable_chars(
+pub extern "C" fn trie_state_walkable_chars(
     mut s: *const TrieState,
-    mut chars: *mut AlphaChar,
-    mut chars_nelm: libc::c_int,
-) -> libc::c_int {
-    let mut syms_num: libc::c_int = 0 as libc::c_int;
-    if !(*s).is_suffix {
-        let mut syms = da_output_symbols(&(*(*s).trie).da, (*s).index);
-        let mut i: libc::c_int = 0;
-        syms_num = syms.num() as libc::c_int;
-        i = 0 as libc::c_int;
-        while i < syms_num && i < chars_nelm {
-            let mut tc: TrieChar = syms.get(i as usize).unwrap();
-            *chars.offset(i as isize) = alpha_map_trie_to_char(&(*(*s).trie).alpha_map, tc);
-            i += 1;
-        }
-    } else {
-        let mut suffix: *const TrieChar = tail_get_suffix(&(*(*s).trie).tail, (*s).index);
-        *chars.offset(0 as libc::c_int as isize) = alpha_map_trie_to_char(
-            &(*(*s).trie).alpha_map,
-            *suffix.offset((*s).suffix_idx as isize),
-        );
-        syms_num = 1 as libc::c_int;
-    }
-    return syms_num;
+    mut chars: NonNull<AlphaChar>,
+    chars_nelm: i32,
+) -> i32 {
+    let state = unsafe { &*s };
+    let chars = unsafe { slice::from_raw_parts_mut(chars.as_ptr(), chars_nelm as usize) };
+
+    let out = state.walkable_chars();
+
+    let copy_len = cmp::min(out.len(), chars.len());
+    chars[..copy_len].copy_from_slice(&out[..copy_len]);
+
+    out.len() as i32
 }
 
 #[deprecated(note = "Use s.is_single()")]
