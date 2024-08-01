@@ -1,19 +1,21 @@
+use std::{cmp, io, iter, ptr, slice};
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
+use std::ops::Deref;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::{cmp, io, iter, ptr, slice};
 
 use ::libc;
 
 use crate::alpha_map::AlphaMap;
-use crate::darray::{da_first_separate, da_next_separate, DArray};
+use crate::darray::DArray;
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::Tail;
-use crate::trie_string::{TrieString, TRIE_CHAR_TERM};
+use crate::trie_string::{TRIE_CHAR_TERM, TrieString};
 use crate::types::*;
 
 pub type TrieChar = u8;
@@ -21,7 +23,6 @@ pub type TrieChar = u8;
 pub type TrieData = i32;
 pub const TRIE_DATA_ERROR: TrieData = -1;
 
-#[repr(C)]
 pub struct Trie {
     alpha_map: AlphaMap,
     da: DArray,
@@ -155,6 +156,10 @@ impl Trie {
 
     pub fn root(&self) -> TrieState {
         TrieState::new(self, self.da.get_root(), 0, false)
+    }
+
+    pub fn iter(&self) -> TrieIterator {
+        TrieIterator::new_from_trie(self)
     }
 
     pub fn retrieve(&self, key: &[AlphaChar]) -> Option<TrieData> {
@@ -439,19 +444,9 @@ pub extern "C" fn trie_enumerate(
 ) -> Bool {
     let trie = unsafe { &*trie };
 
-    let root = trie.root();
-
-    let mut iter = TrieIterator::new(&root);
-
     let mut cont = true;
-    while cont && unsafe { trie_iterator_next(&mut iter) }.into() {
-        let mut key = iter.key();
-        let key_ptr = match key.as_mut() {
-            Some(key) => key.as_mut_ptr(),
-            None => ptr::null(),
-        };
-        let data = iter.data();
-        cont = unsafe { enum_func(key_ptr, data.unwrap_or(TRIE_DATA_ERROR), user_data).into() };
+    for (key, data) in trie.iter() {
+        cont = unsafe { enum_func(key.as_ptr(), data.unwrap_or(TRIE_DATA_ERROR), user_data).into() };
     }
 
     cont.into()
@@ -464,8 +459,7 @@ pub extern "C" fn trie_root<'a>(trie: *const Trie) -> *mut TrieState<'a> {
     Box::into_raw(Box::new(trie.root()))
 }
 
-#[derive(Copy, Clone)]
-#[repr(C)]
+#[derive(Clone)]
 pub struct TrieState<'a> {
     /// the corresponding trie
     trie: &'a Trie,
@@ -655,9 +649,8 @@ pub extern "C" fn trie_state_get_data(s: *const TrieState) -> TrieData {
     state.get_data().unwrap_or(TRIE_DATA_ERROR)
 }
 
-#[repr(C)]
 pub struct TrieIterator<'trie: 'state, 'state> {
-    root: &'state TrieState<'trie>,
+    root: Cow<'state, TrieState<'trie>>,
     state: Option<TrieState<'trie>>,
     key: TrieString,
 }
@@ -665,14 +658,22 @@ pub struct TrieIterator<'trie: 'state, 'state> {
 impl<'trie, 'state> TrieIterator<'trie, 'state> {
     pub fn new(root: &'state TrieState<'trie>) -> TrieIterator<'trie, 'state> {
         TrieIterator {
-            root: &root,
+            root: Cow::Borrowed(root),
+            state: None,
+            key: TrieString::default(),
+        }
+    }
+
+    pub fn new_from_trie(trie: &'trie Trie) -> TrieIterator<'trie, 'state> {
+        TrieIterator {
+            root: Cow::Owned(trie.root()),
             state: None,
             key: TrieString::default(),
         }
     }
 
     pub fn key(&self) -> Option<Vec<AlphaChar>> {
-        let state = &self.state?;
+        let state = self.state.as_ref()?;
 
         let mut tail_str;
         let mut out = Vec::new();
@@ -705,7 +706,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
     }
 
     pub fn data(&self) -> Option<TrieData> {
-        let state = &self.state?;
+        let state = self.state.as_ref()?;
 
         let tail_index;
 
@@ -719,6 +720,44 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
         }
 
         state.trie.tail.get_data(tail_index)
+    }
+
+    fn iter_next(&mut self) -> bool {
+        return match &mut self.state {
+            Some(state) => {
+                // no next entry for tail state
+                if state.is_suffix {
+                    return false
+                }
+
+                let Some(sep) = state.trie.da.next_separate(self.root.index, state.index, &mut self.key) else {return false };
+                state.index = sep;
+                true
+            },
+            None => {
+                let state = self.state.insert(self.root.deref().clone());
+
+                // for tail state, we are already at the only entry
+                if state.is_suffix {
+                    return true
+                }
+
+                let Some(sep) = state.trie.da.first_separate(state.index, &mut self.key) else {return false };
+                state.index = sep;
+                true
+            },
+        }
+    }
+}
+
+impl<'trie, 'state> Iterator for TrieIterator<'trie, 'state> {
+    type Item = (Vec<AlphaChar>, Option<TrieData>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.iter_next() {
+            true => Some((self.key().unwrap(), self.data())),
+            false => None
+        }
     }
 }
 
@@ -734,38 +773,11 @@ pub unsafe extern "C" fn trie_iterator_free(iter: NonNull<TrieIterator>) {
     drop(Box::from_raw(iter.as_ptr()))
 }
 
+#[deprecated(note = "Use iter as Iterator")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_iterator_next(mut iter: *mut TrieIterator) -> Bool {
-    let mut s: *mut TrieState = (*iter).state.as_mut().map_or(ptr::null_mut(), |v| v);
-    let mut sep: TrieIndex = 0;
-    if s.is_null() {
-        (*iter).state = Some((*iter).root.clone());
-        s = (*iter).state.as_mut().map_or(ptr::null_mut(), |v| v);
-        if !!(*s).is_suffix {
-            return TRUE as Bool;
-        }
-        (*iter).key = TrieString::default();
-        sep = da_first_separate(&(*(*s).trie).da, (*s).index, (&mut (*iter).key).into());
-        if TRIE_INDEX_ERROR == sep {
-            return FALSE as Bool;
-        }
-        (*s).index = sep;
-        return TRUE as Bool;
-    }
-    if !!(*s).is_suffix {
-        return FALSE as Bool;
-    }
-    sep = da_next_separate(
-        &(*(*s).trie).da,
-        (*(*iter).root).index,
-        (*s).index,
-        (&mut (*iter).key).into(),
-    );
-    if TRIE_INDEX_ERROR == sep {
-        return FALSE as Bool;
-    }
-    (*s).index = sep;
-    return TRUE as Bool;
+pub extern "C" fn trie_iterator_next(mut iter: NonNull<TrieIterator>) -> Bool {
+    let iter = unsafe { iter.as_mut() };
+    iter.iter_next().into()
 }
 
 #[deprecated(note = "Use iter.key()")]
