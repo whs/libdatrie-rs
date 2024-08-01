@@ -10,12 +10,10 @@ use std::ptr::NonNull;
 use ::libc;
 
 use crate::alpha_map::AlphaMap;
-use crate::darray::{da_first_separate, da_get_base, da_next_separate, DArray};
+use crate::darray::{da_first_separate, da_next_separate, DArray};
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::tail::{Tail, tail_get_data};
-use crate::trie_string::{
-    TRIE_CHAR_TERM, TrieString,
-};
+use crate::tail::Tail;
+use crate::trie_string::{TRIE_CHAR_TERM, TrieString};
 use crate::types::*;
 
 extern "C" {
@@ -306,7 +304,6 @@ impl Trie {
 #[deprecated(note = "Use Trie::new()")]
 #[no_mangle]
 pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
-    println!("trie_new: Rust!");
     let trie = Trie::new(unsafe { &*alpha_map }.clone());
     Box::into_raw(Box::new(trie))
 }
@@ -314,7 +311,6 @@ pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
 #[deprecated(note = "Use Trie::from_file()")]
 #[no_mangle]
 pub extern "C" fn trie_new_from_file(path: *const libc::c_char) -> *mut Trie {
-    println!("trie_new_from_file: Rust!");
     let str = unsafe { CStr::from_ptr(path) };
     let osstr = OsStr::from_bytes(str.to_bytes());
     let Ok(trie) = Trie::from_file(osstr) else {
@@ -702,6 +698,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
             let tail_idx = state.trie.da.get_tail_index(state.index);
             tail_str = state.trie.tail.get_suffix(tail_idx)?;
 
+            // Add current key to the output
             out.extend(
                 self.key
                     .iter()
@@ -718,6 +715,23 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
         out.push(0);
 
         Some(out)
+    }
+
+    pub fn data(&self) -> Option<TrieData> {
+        let state = &self.state?;
+
+        let tail_index;
+
+        if !state.is_suffix {
+            if !state.trie.da.is_separate(state.index) {
+                return None;
+            }
+            tail_index = state.trie.da.get_tail_index(state.index);
+        } else {
+            tail_index = state.index;
+        }
+
+        state.trie.tail.get_data(tail_index)
     }
 }
 
@@ -777,20 +791,9 @@ pub extern "C" fn trie_iterator_get_key(iter: *const TrieIterator) -> *mut Alpha
     }
 }
 
+#[deprecated(note = "Use iter.data().unwrap_or(TRIE_DATA_ERROR)")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_iterator_get_data(mut iter: *const TrieIterator) -> TrieData {
-    let mut s: *const TrieState = (*iter).state.as_ref().map_or(ptr::null(), |v| v);
-    let mut tail_index: TrieIndex = 0;
-    if s.is_null() {
-        return TRIE_DATA_ERROR;
-    }
-    if !(*s).is_suffix {
-        if !(da_get_base(&(*(*s).trie).da, (*s).index) < 0 as libc::c_int) {
-            return TRIE_DATA_ERROR;
-        }
-        tail_index = -da_get_base(&(*(*s).trie).da, (*s).index);
-    } else {
-        tail_index = (*s).index;
-    }
-    return tail_get_data(&(*(*s).trie).tail, tail_index);
+pub extern "C" fn trie_iterator_get_data(iter: *const TrieIterator) -> TrieData {
+    let iter = unsafe { &*iter };
+    iter.data().unwrap_or(TRIE_DATA_ERROR)
 }
