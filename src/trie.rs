@@ -1,4 +1,3 @@
-use std::{cmp, io, iter, ptr, slice};
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::ffi::{CStr, OsStr};
@@ -8,14 +7,15 @@ use std::ops::Deref;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
+use std::{cmp, io, iter, ptr, slice};
 
 use ::libc;
 
-use crate::alpha_map::AlphaMap;
+use crate::alpha_map::{AlphaMap, ToAlphaChars};
 use crate::darray::DArray;
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::Tail;
-use crate::trie_string::{TRIE_CHAR_TERM, TrieString};
+use crate::trie_string::{TrieString, TRIE_CHAR_TERM};
 use crate::types::*;
 
 pub type TrieChar = u8;
@@ -446,7 +446,8 @@ pub extern "C" fn trie_enumerate(
 
     let mut cont = true;
     for (key, data) in trie.iter() {
-        cont = unsafe { enum_func(key.as_ptr(), data.unwrap_or(TRIE_DATA_ERROR), user_data).into() };
+        cont =
+            unsafe { enum_func(key.as_ptr(), data.unwrap_or(TRIE_DATA_ERROR), user_data).into() };
     }
 
     cont.into()
@@ -535,7 +536,8 @@ impl<'a> TrieState<'a> {
                 .da
                 .output_symbols(self.index)
                 .iter()
-                .map(|tc| self.trie.alpha_map.trie_to_char(*tc))
+                .copied()
+                .map_to_alpha_char(&self.trie.alpha_map)
                 .collect()
         } else {
             let suffix = self.trie.tail.get_suffix(self.index).unwrap();
@@ -690,16 +692,12 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
             out.extend(
                 self.key
                     .iter()
-                    .map(|ch| state.trie.alpha_map.trie_to_char(*ch)),
+                    .copied()
+                    .map_to_alpha_char(&state.trie.alpha_map),
             )
         }
 
-        out.extend(tail_str.iter().map_while(|ch| {
-            if *ch == TRIE_CHAR_TERM {
-                return None;
-            }
-            Some(state.trie.alpha_map.trie_to_char(*ch))
-        }));
+        out.extend(tail_str.iter().copied().map_to_alpha_char(&state.trie.alpha_map));
         out.push(0);
 
         Some(out)
@@ -727,26 +725,35 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
             Some(state) => {
                 // no next entry for tail state
                 if state.is_suffix {
-                    return false
+                    return false;
                 }
 
-                let Some(sep) = state.trie.da.next_separate(self.root.index, state.index, &mut self.key) else {return false };
+                let Some(sep) =
+                    state
+                        .trie
+                        .da
+                        .next_separate(self.root.index, state.index, &mut self.key)
+                else {
+                    return false;
+                };
                 state.index = sep;
                 true
-            },
+            }
             None => {
                 let state = self.state.insert(self.root.deref().clone());
 
                 // for tail state, we are already at the only entry
                 if state.is_suffix {
-                    return true
+                    return true;
                 }
 
-                let Some(sep) = state.trie.da.first_separate(state.index, &mut self.key) else {return false };
+                let Some(sep) = state.trie.da.first_separate(state.index, &mut self.key) else {
+                    return false;
+                };
                 state.index = sep;
                 true
-            },
-        }
+            }
+        };
     }
 }
 
@@ -756,7 +763,7 @@ impl<'trie, 'state> Iterator for TrieIterator<'trie, 'state> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter_next() {
             true => Some((self.key().unwrap(), self.data())),
-            false => None
+            false => None,
         }
     }
 }

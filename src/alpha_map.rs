@@ -138,7 +138,8 @@ impl AlphaMap {
 
     pub(crate) fn char_to_trie_str(&self, str: &[AlphaChar]) -> Option<Vec<TrieChar>> {
         str.iter()
-            .map(|v| self.char_to_trie(*v).map(|v| v as TrieChar))
+            .copied()
+            .map_to_trie_char(self)
             .chain(iter::once(Some(TRIE_CHAR_TERM)))
             .collect()
     }
@@ -149,12 +150,34 @@ impl AlphaMap {
             .copied()
             .unwrap_or(ALPHA_CHAR_ERROR)
     }
+}
 
-    pub(crate) fn trie_to_char_str(&self, str: &[TrieChar]) -> Vec<AlphaChar> {
-        str.iter()
-            .map(|chr| self.trie_to_char(*chr))
-            .chain(iter::once(0))
-            .collect()
+pub(crate) trait ToAlphaChars {
+    fn map_to_alpha_char(self, alpha_map: &AlphaMap) -> impl Iterator<Item = AlphaChar>;
+}
+
+impl<T: Iterator<Item = TrieChar>> ToAlphaChars for T {
+    fn map_to_alpha_char(self, alpha_map: &AlphaMap) -> impl Iterator<Item = AlphaChar>
+    where
+        Self: Sized,
+    {
+        self.map_while(|chr| match chr {
+            TRIE_CHAR_TERM => None,
+            chr => Some(alpha_map.trie_to_char(chr)),
+        })
+    }
+}
+
+pub(crate) trait ToTrieChar {
+    fn map_to_trie_char(self, alpha_map: &AlphaMap) -> impl Iterator<Item = Option<TrieChar>>;
+}
+
+impl<T: Iterator<Item = AlphaChar>> ToTrieChar for T {
+    fn map_to_trie_char(self, alpha_map: &AlphaMap) -> impl Iterator<Item = Option<TrieChar>>
+    where
+        Self: Sized,
+    {
+        self.map(|chr| alpha_map.char_to_trie(chr).map(|v| v as TrieChar))
     }
 }
 
