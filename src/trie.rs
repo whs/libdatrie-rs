@@ -140,8 +140,8 @@ impl Trie {
         let sep = p;
         let t = -self.da.get_tail_index(s);
         let mut suffix_idx = 0;
-        loop {
-            let Some(tc) = self.alpha_map.char_to_trie(p[0]) else {
+        for ch in p.iter().copied() {
+            let Some(tc) = self.alpha_map.char_to_trie(ch) else {
                 return false;
             };
             if let Some(next_idx) = self.tail.walk_char(t, suffix_idx, tc as TrieChar) {
@@ -152,10 +152,9 @@ impl Trie {
                 };
                 return self.branch_in_tail(s, &tail_str, data).into();
             }
-            if p[0] == 0 {
+            if ch == 0 {
                 break;
             }
-            p = &p[1..];
         }
 
         // duplicated, overwrite val if flagged
@@ -258,6 +257,49 @@ impl Trie {
 
         // insert the new branch at the new separate point
         self.branch_in_branch(s, suffix, data)
+    }
+
+    pub fn delete(&mut self, key: &[AlphaChar]) -> bool {
+        let mut s = self.da.get_root();
+        let mut p = key;
+        while !self.da.is_separate(s) {
+            let Some(tc) = self.alpha_map.char_to_trie(p[0]) else {
+                return false;
+            };
+            if let Some(new_s) = self.da.walk(s, tc as TrieChar) {
+                s = new_s;
+            } else {
+                return false;
+            }
+            if p[0] == 0 {
+                break;
+            }
+            p = &p[1..];
+        }
+
+        let t = self.da.get_tail_index(s);
+        let mut suffix_idx = 0;
+
+        for ch in p.iter().copied() {
+            let Some(tc) = self.alpha_map.char_to_trie(ch) else {
+                return false;
+            };
+            if let Some(new_idx) = self.tail.walk_char(t, suffix_idx, tc as TrieChar) {
+                suffix_idx = new_idx;
+            } else {
+                return false;
+            }
+            if ch == 0 {
+                break;
+            }
+        }
+
+        self.tail.delete(t);
+        self.da.set_base(s, TRIE_INDEX_ERROR);
+        self.da.prune(s);
+
+        self.is_dirty.set(true);
+        true
     }
 }
 
@@ -393,48 +435,9 @@ pub extern "C" fn trie_store_if_absent(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn trie_delete(mut trie: NonNull<Trie>, key: *const AlphaChar) -> Bool {
-    let mut trie = trie.as_mut();
-
-    let mut s = trie.da.get_root();
-    let mut p = key;
-    while !trie.da.is_separate(s) {
-        let Some(tc) = trie.alpha_map.char_to_trie(*p) else {
-            return FALSE;
-        };
-        if let Some(new_s) = trie.da.walk(s, tc as TrieChar) {
-            s = new_s;
-        } else {
-            return FALSE;
-        }
-        if *p == 0 {
-            break;
-        }
-        p = p.offset(1);
-    }
-    let t = trie.da.get_tail_index(s);
-    let mut suffix_idx = 0;
-    loop {
-        let Some(tc) = trie.alpha_map.char_to_trie(*p) else {
-            return FALSE;
-        };
-        if let Some(new_idx) = trie.tail.walk_char(t, suffix_idx, tc as TrieChar) {
-            suffix_idx = new_idx;
-        } else {
-            return FALSE;
-        }
-        if *p == 0 {
-            break;
-        }
-        p = p.offset(1);
-    }
-
-    trie.tail.delete(t);
-    trie.da.set_base(s, TRIE_INDEX_ERROR);
-    trie.da.prune(s);
-
-    trie.is_dirty.set(true);
-    TRUE
+pub extern "C" fn trie_delete(mut trie: NonNull<Trie>, key: *const AlphaChar) -> Bool {
+    let mut trie = unsafe { trie.as_mut() };
+    trie.delete(alpha_char_as_slice(key)).into()
 }
 
 pub type TrieEnumFunc =
