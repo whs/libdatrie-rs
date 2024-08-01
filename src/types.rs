@@ -5,7 +5,7 @@ use null_terminated::Nul;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
-pub(crate) struct Bool(u32);
+pub struct Bool(u32);
 
 pub(crate) const DA_TRUE: Bool = Bool(1);
 pub(crate) const DA_FALSE: Bool = Bool(0);

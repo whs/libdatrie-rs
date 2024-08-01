@@ -1,5 +1,5 @@
+use std::io;
 use std::io::{Read, Write};
-use std::{io, ptr};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 

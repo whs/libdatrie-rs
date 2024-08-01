@@ -16,10 +16,6 @@ use crate::tail::Tail;
 use crate::trie_string::{TrieString, TRIE_CHAR_TERM};
 use crate::types::*;
 
-extern "C" {
-    fn free(_: *mut libc::c_void);
-}
-
 pub type TrieChar = u8;
 
 pub type TrieData = i32;
@@ -433,38 +429,32 @@ pub extern "C" fn trie_delete(mut trie: NonNull<Trie>, key: *const AlphaChar) ->
     trie.delete(alpha_char_as_slice(key)).into()
 }
 
-pub type TrieEnumFunc =
-    Option<unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool>;
+pub type TrieEnumFunc = unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool;
 
 #[no_mangle]
-pub unsafe extern "C" fn trie_enumerate(
-    mut trie: *mut Trie,
-    mut enum_func: TrieEnumFunc,
-    mut user_data: *mut libc::c_void,
+pub extern "C" fn trie_enumerate(
+    trie: *const Trie,
+    enum_func: TrieEnumFunc,
+    user_data: *mut libc::c_void,
 ) -> Bool {
-    let mut root: *mut TrieState = 0 as *mut TrieState;
-    let mut iter: *mut TrieIterator = 0 as *mut TrieIterator;
-    let mut cont: Bool = TRUE;
-    root = trie_root(trie);
-    if root.is_null() {
-        return FALSE;
+    let trie = unsafe { &*trie };
+
+    let root = trie.root();
+
+    let mut iter = TrieIterator::new(&root);
+
+    let mut cont = true;
+    while cont && unsafe { trie_iterator_next(&mut iter) }.into() {
+        let mut key = iter.key();
+        let key_ptr = match key.as_mut() {
+            Some(key) => key.as_mut_ptr(),
+            None => ptr::null(),
+        };
+        let data = iter.data();
+        cont = unsafe { enum_func(key_ptr, data.unwrap_or(TRIE_DATA_ERROR), user_data).into() };
     }
-    iter = trie_iterator_new(NonNull::new_unchecked(root));
-    if iter.is_null() {
-        trie_state_free(NonNull::new_unchecked(root));
-        return FALSE;
-    } else {
-        while cont.into() && trie_iterator_next(iter).into() {
-            let mut key: *mut AlphaChar = trie_iterator_get_key(iter);
-            let mut data: TrieData = trie_iterator_get_data(iter);
-            cont = (Some(enum_func.expect("non-null function pointer")))
-                .expect("non-null function pointer")(key, data, user_data);
-            free(key as *mut libc::c_void);
-        }
-        trie_iterator_free(NonNull::new_unchecked(iter));
-        trie_state_free(NonNull::new_unchecked(root));
-        return cont;
-    };
+
+    cont.into()
 }
 
 #[deprecated(note = "Use trie.root()")]
@@ -634,8 +624,8 @@ pub extern "C" fn trie_state_is_walkable(s: *const TrieState, c: AlphaChar) -> B
 #[deprecated(note = "Use chars = s.walkable_chars()")]
 #[no_mangle]
 pub extern "C" fn trie_state_walkable_chars(
-    mut s: *const TrieState,
-    mut chars: NonNull<AlphaChar>,
+    s: *const TrieState,
+    chars: NonNull<AlphaChar>,
     chars_nelm: i32,
 ) -> i32 {
     let state = unsafe { &*s };
