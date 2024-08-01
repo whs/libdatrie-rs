@@ -15,7 +15,7 @@ use crate::alpha_map::{AlphaMap, ToAlphaChars};
 use crate::darray::DArray;
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::Tail;
-use crate::trie_string::{TrieString, TRIE_CHAR_TERM};
+use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 
 pub type TrieChar = u8;
@@ -654,7 +654,7 @@ pub extern "C" fn trie_state_get_data(s: *const TrieState) -> TrieData {
 pub struct TrieIterator<'trie: 'state, 'state> {
     root: Cow<'state, TrieState<'trie>>,
     state: Option<TrieState<'trie>>,
-    key: TrieString,
+    key: Vec<TrieChar>,
 }
 
 impl<'trie, 'state> TrieIterator<'trie, 'state> {
@@ -662,7 +662,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
         TrieIterator {
             root: Cow::Borrowed(root),
             state: None,
-            key: TrieString::default(),
+            key: Vec::<TrieChar>::default(),
         }
     }
 
@@ -670,7 +670,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
         TrieIterator {
             root: Cow::Owned(trie.root()),
             state: None,
-            key: TrieString::default(),
+            key: Vec::<TrieChar>::default(),
         }
     }
 

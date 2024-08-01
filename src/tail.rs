@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR};
-use crate::trie_string::TRIE_CHAR_TERM;
+use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 
 #[derive(Default)]

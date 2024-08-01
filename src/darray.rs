@@ -5,8 +5,8 @@ use std::{cmp, io};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::symbols::Symbols;
-use crate::trie_string::{TrieChar, TrieString, TRIE_CHAR_MAX};
 use crate::types::*;
+use crate::types::{TRIE_CHAR_MAX, TrieChar};
 
 #[derive(Default, Clone)]
 pub(crate) struct DACell {
@@ -346,7 +346,7 @@ impl DArray {
     pub(crate) fn first_separate(
         &self,
         root: TrieIndex,
-        keybuff: &mut TrieString,
+        keybuff: &mut Vec<TrieChar>,
     ) -> Option<TrieIndex> {
         let mut root = root;
         while let Some(base) = self.get_base(root) {
@@ -358,7 +358,7 @@ impl DArray {
                 self.cells.len() as TrieIndex - base,
             );
             let c = (0..=max_c).find(|c| self.get_check(base + c) == Some(root))?;
-            keybuff.append(c as TrieChar);
+            keybuff.push(c as TrieChar);
             root = base + c;
         }
         Some(root)
@@ -376,7 +376,7 @@ impl DArray {
         &self,
         root: TrieIndex,
         sep: TrieIndex,
-        keybuff: &mut TrieString,
+        keybuff: &mut Vec<TrieChar>,
     ) -> Option<TrieIndex> {
         let mut sep = sep;
         while sep != root {
@@ -393,7 +393,7 @@ impl DArray {
             );
             for c in (c + 1)..=max_c {
                 if self.get_check(base + c) == Some(parent) {
-                    keybuff.append(c as TrieChar);
+                    keybuff.push(c as TrieChar);
                     return self.first_separate(base + c, keybuff);
                 }
             }
@@ -497,7 +497,7 @@ impl Default for DArray {
 pub(crate) extern "C" fn da_first_separate(
     d: *const DArray,
     root: TrieIndex,
-    mut keybuff: NonNull<TrieString>,
+    mut keybuff: NonNull<Vec<TrieChar>>,
 ) -> TrieIndex {
     let da = unsafe { &*d };
     let keybuff = unsafe { keybuff.as_mut() };
@@ -510,7 +510,7 @@ pub(crate) unsafe extern "C" fn da_next_separate(
     d: *const DArray,
     root: TrieIndex,
     sep: TrieIndex,
-    mut keybuff: NonNull<TrieString>,
+    mut keybuff: NonNull<Vec<TrieChar>>,
 ) -> TrieIndex {
     let da = unsafe { &*d };
     let keybuff = unsafe { keybuff.as_mut() };

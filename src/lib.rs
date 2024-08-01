@@ -4,7 +4,6 @@ mod fileutils;
 mod symbols;
 mod tail;
 pub mod trie;
-mod trie_string;
 pub mod types;
 
 // pub mod tests {

@@ -1,4 +1,4 @@
-use crate::trie_string::TrieChar;
+use crate::types::TrieChar;
 use arrayvec::ArrayVec;
 use std::slice::Iter;
 
@@ -38,7 +38,7 @@ impl Symbols {
 #[cfg(test)]
 mod tests {
     use crate::symbols::Symbols;
-    use crate::trie_string::TrieChar;
+    use crate::types::TrieChar;
 
     #[test]
     fn test_symbol() {

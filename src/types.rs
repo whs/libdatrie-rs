@@ -65,3 +65,7 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
         Ordering::Greater => 1,
     }
 }
+
+pub type TrieChar = u8;
+pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
+pub const TRIE_CHAR_MAX: TrieChar = TrieChar::MAX;

@@ -6,8 +6,8 @@ use std::{io, iter, ptr};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
-use crate::trie_string::{TrieChar, TRIE_CHAR_TERM};
 use crate::types::*;
+use crate::types::{TRIE_CHAR_TERM, TrieChar};
 
 #[derive(Clone, Default)]
 pub struct AlphaMap {
