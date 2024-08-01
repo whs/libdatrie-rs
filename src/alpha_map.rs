@@ -182,12 +182,14 @@ impl<T: Iterator<Item = AlphaChar>> ToTrieChar for T {
 }
 
 #[deprecated(note = "Use AlphaMap::default()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
     Box::into_raw(Box::new(AlphaMap::default()))
 }
 
 #[deprecated(note = "Use a_map::clone()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn alpha_map_clone(a_map: *const AlphaMap) -> *mut AlphaMap {
     let Some(am) = (unsafe { a_map.as_ref() }) else {
@@ -197,14 +199,14 @@ pub extern "C" fn alpha_map_clone(a_map: *const AlphaMap) -> *mut AlphaMap {
     Box::into_raw(Box::new(am.clone()))
 }
 
-#[deprecated(note = "Just drop alpha_map")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub unsafe extern "C" fn alpha_map_free(mut alpha_map: NonNull<AlphaMap>) {
-    let am = Box::from_raw(alpha_map.as_mut());
-    drop(am) // This is not strictly needed, but it helps in clarity
+    drop(Box::from_raw(alpha_map.as_mut()))
 }
 
 #[deprecated(note = "Use alpha_map.add_range(begin..=end)")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn alpha_map_add_range(
     mut alpha_map: NonNull<AlphaMap>,

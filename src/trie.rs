@@ -4,19 +4,24 @@ use std::ffi::{CStr, OsStr};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::ops::Deref;
+#[cfg(unix)]
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
 use std::{cmp, io, iter, ptr, slice};
 
+#[cfg(feature = "cffi")]
 use ::libc;
 
 use crate::alpha_map::{AlphaMap, ToAlphaChars};
 use crate::darray::DArray;
+#[cfg(feature = "cffi")]
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::Tail;
 use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
+#[cfg(feature = "cffi")]
+use crate::types_c::{Bool, FALSE, TRUE};
 
 pub type TrieChar = u8;
 
@@ -300,6 +305,7 @@ impl Trie {
 }
 
 #[deprecated(note = "Use Trie::new()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
     let trie = Trie::new(unsafe { &*alpha_map }.clone());
@@ -307,6 +313,7 @@ pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
 }
 
 #[deprecated(note = "Use Trie::from_file()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_new_from_file(path: *const libc::c_char) -> *mut Trie {
     let str = unsafe { CStr::from_ptr(path) };
@@ -318,6 +325,7 @@ pub extern "C" fn trie_new_from_file(path: *const libc::c_char) -> *mut Trie {
 }
 
 #[deprecated(note = "Use Trie::from_reader()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_fread(file: NonNull<libc::FILE>) -> *mut Trie {
     let mut file = wrap_cfile_nonnull(file);
@@ -327,12 +335,14 @@ pub extern "C" fn trie_fread(file: NonNull<libc::FILE>) -> *mut Trie {
     Box::into_raw(Box::new(trie))
 }
 
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub unsafe extern "C" fn trie_free(trie: *mut Trie) {
     drop(Box::from_raw(trie))
 }
 
 #[deprecated(note = "Use trie.save()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_save(mut trie: NonNull<Trie>, path: *const libc::c_char) -> i32 {
     let trie = unsafe { trie.as_mut() };
@@ -345,13 +355,15 @@ pub extern "C" fn trie_save(mut trie: NonNull<Trie>, path: *const libc::c_char) 
 }
 
 #[deprecated(note = "Use trie.serialized_size()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_get_serialized_size(trie: *const Trie) -> usize {
+pub extern "C" fn trie_get_serialized_size(trie: *const Trie) -> libc::size_t {
     let trie = unsafe { &*trie };
     trie.serialized_size()
 }
 
 #[deprecated(note = "Use trie.serialize()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_serialize(mut trie: NonNull<Trie>, ptr: *mut u8) {
     // Seems that this doesn't actually move the pointer?
@@ -362,6 +374,7 @@ pub extern "C" fn trie_serialize(mut trie: NonNull<Trie>, ptr: *mut u8) {
 }
 
 #[deprecated(note = "Use trie.serialize()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_fwrite(mut trie: NonNull<Trie>, file: NonNull<libc::FILE>) -> i32 {
     let trie = unsafe { trie.as_mut() };
@@ -373,6 +386,7 @@ pub extern "C" fn trie_fwrite(mut trie: NonNull<Trie>, file: NonNull<libc::FILE>
 }
 
 #[deprecated(note = "Use trie.is_dirty()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_is_dirty(trie: *const Trie) -> Bool {
     let trie = unsafe { &*trie };
@@ -380,6 +394,7 @@ pub extern "C" fn trie_is_dirty(trie: *const Trie) -> Bool {
 }
 
 #[deprecated(note = "Use trie.retrieve()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_retrieve(
     trie: *const Trie,
@@ -403,6 +418,7 @@ pub extern "C" fn trie_retrieve(
 }
 
 #[deprecated(note = "Use trie.store()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_store(
     mut trie: NonNull<Trie>,
@@ -416,6 +432,7 @@ pub extern "C" fn trie_store(
 }
 
 #[deprecated(note = "Use trie.store_if_absent()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_store_if_absent(
     mut trie: NonNull<Trie>,
@@ -428,14 +445,17 @@ pub extern "C" fn trie_store_if_absent(
     trie.store_conditionally(key_slice, data, false).into()
 }
 
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_delete(mut trie: NonNull<Trie>, key: *const AlphaChar) -> Bool {
     let trie = unsafe { trie.as_mut() };
     trie.delete(alpha_char_as_slice(key)).into()
 }
 
+#[cfg(feature = "cffi")]
 pub type TrieEnumFunc = unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool;
 
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_enumerate(
     trie: *const Trie,
@@ -454,6 +474,7 @@ pub extern "C" fn trie_enumerate(
 }
 
 #[deprecated(note = "Use trie.root()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_root<'a>(trie: *const Trie) -> *mut TrieState<'a> {
     let trie = unsafe { &*trie };
@@ -575,6 +596,7 @@ impl<'a> TrieState<'a> {
 }
 
 #[deprecated(note = "Use TrieState.clone_from()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_copy<'a>(mut dst: NonNull<TrieState<'a>>, src: *const TrieState<'a>) {
     let dst = unsafe { dst.as_mut() };
@@ -584,6 +606,7 @@ pub extern "C" fn trie_state_copy<'a>(mut dst: NonNull<TrieState<'a>>, src: *con
 }
 
 #[deprecated(note = "Use TrieState.clone()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_clone(s: *const TrieState) -> *mut TrieState {
     let state = unsafe { &*s };
@@ -591,12 +614,14 @@ pub extern "C" fn trie_state_clone(s: *const TrieState) -> *mut TrieState {
     Box::into_raw(Box::new(cloned))
 }
 
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub unsafe extern "C" fn trie_state_free(s: NonNull<TrieState>) {
     drop(Box::from_raw(s.as_ptr()))
 }
 
 #[deprecated(note = "Use s.rewind()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_rewind(mut s: NonNull<TrieState>) {
     let state = unsafe { s.as_mut() };
@@ -604,6 +629,7 @@ pub extern "C" fn trie_state_rewind(mut s: NonNull<TrieState>) {
 }
 
 #[deprecated(note = "Use s.walk()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_walk(mut s: NonNull<TrieState>, c: AlphaChar) -> Bool {
     let state = unsafe { s.as_mut() };
@@ -611,6 +637,7 @@ pub extern "C" fn trie_state_walk(mut s: NonNull<TrieState>, c: AlphaChar) -> Bo
 }
 
 #[deprecated(note = "Use s.is_walkable()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_is_walkable(s: *const TrieState, c: AlphaChar) -> Bool {
     let state = unsafe { &*s };
@@ -618,6 +645,7 @@ pub extern "C" fn trie_state_is_walkable(s: *const TrieState, c: AlphaChar) -> B
 }
 
 #[deprecated(note = "Use chars = s.walkable_chars()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_walkable_chars(
     s: *const TrieState,
@@ -636,6 +664,7 @@ pub extern "C" fn trie_state_walkable_chars(
 }
 
 #[deprecated(note = "Use s.is_single()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_is_single(s: *const TrieState) -> Bool {
     let state = unsafe { &*s };
@@ -643,6 +672,7 @@ pub extern "C" fn trie_state_is_single(s: *const TrieState) -> Bool {
 }
 
 #[deprecated(note = "Use s.get_data().unwrap_or(TRIE_DATA_ERROR)")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_get_data(s: *const TrieState) -> TrieData {
     let Some(state) = (unsafe { s.as_ref() }) else {
@@ -774,18 +804,21 @@ impl<'trie, 'state> Iterator for TrieIterator<'trie, 'state> {
 }
 
 #[deprecated(note = "Use TrieIterator::new()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_iterator_new(s: NonNull<TrieState>) -> *mut TrieIterator {
     let i = TrieIterator::new(unsafe { s.as_ref() });
     Box::into_raw(Box::new(i))
 }
 
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub unsafe extern "C" fn trie_iterator_free(iter: NonNull<TrieIterator>) {
     drop(Box::from_raw(iter.as_ptr()))
 }
 
 #[deprecated(note = "Use iter as Iterator")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_iterator_next(mut iter: NonNull<TrieIterator>) -> Bool {
     let iter = unsafe { iter.as_mut() };
@@ -793,6 +826,7 @@ pub extern "C" fn trie_iterator_next(mut iter: NonNull<TrieIterator>) -> Bool {
 }
 
 #[deprecated(note = "Use iter.key()")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_iterator_get_key(iter: *const TrieIterator) -> *mut AlphaChar {
     let iter = unsafe { &*iter };
@@ -803,6 +837,7 @@ pub extern "C" fn trie_iterator_get_key(iter: *const TrieIterator) -> *mut Alpha
 }
 
 #[deprecated(note = "Use iter.data().unwrap_or(TRIE_DATA_ERROR)")]
+#[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_iterator_get_data(iter: *const TrieIterator) -> TrieData {
     let iter = unsafe { &*iter };

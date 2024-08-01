@@ -1,11 +1,14 @@
+#[cfg_attr(not(feature = "cffi"), deny(unsafe_code))]
 pub mod alpha_map;
 mod darray;
+#[cfg(feature = "cffi")]
 mod fileutils;
 mod symbols;
 mod tail;
 pub mod trie;
 pub mod types;
-
+#[cfg(feature = "cffi")]
+mod types_c;
 // pub mod tests {
 //     pub mod test_byte_alpha;
 //     pub mod test_byte_list;

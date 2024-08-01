@@ -4,16 +4,23 @@ version = "0.1.0"
 edition = "2021"
 license = "LGPL-2.1"
 
+[features]
+default = ["cffi"]
+cffi = ["dep:libc", "dep:null-terminated", "dep:cstream"]
+
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-libc = "0.2"
-null-terminated = "0.3.17"
+libc = { version = "0.2", optional = true }
+null-terminated = { version = "0.3.17", optional = true }
 byteorder = "1"
-cstream = "0.1.4"
+cstream = { version = "0.1.4", optional = true }
 rangemap = "1.5.1"
 arrayvec = "0.7.4"
+
+[build-dependencies]
+cbindgen = "0.26.0"
 
 [profile.release-debug]
 inherits = "release"
