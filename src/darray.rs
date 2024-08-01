@@ -344,7 +344,7 @@ impl DArray {
     /// transition key, which is more efficient than later totally reconstructing
     /// key from the given separate node.
     pub(crate) fn first_separate(
-        &mut self,
+        &self,
         root: TrieIndex,
         keybuff: &mut TrieString,
     ) -> Option<TrieIndex> {
@@ -373,7 +373,7 @@ impl DArray {
     /// call before. This incremental key calculation is more efficient than later
     /// totally reconstructing key from the given separate node.
     pub(crate) fn next_separate(
-        &mut self,
+        &self,
         root: TrieIndex,
         sep: TrieIndex,
         keybuff: &mut TrieString,
@@ -454,6 +454,12 @@ impl DArray {
 
     pub(crate) fn is_separate(&self, s: TrieIndex) -> bool {
         self.get_base(s).unwrap() < 0
+    }
+
+    pub(crate) fn is_walkable(&self, s: TrieIndex, c: TrieChar) -> bool {
+        self.get_check(self.get_base(s).unwrap_or(TRIE_INDEX_ERROR) + c as TrieIndex)
+            .unwrap_or(TRIE_INDEX_ERROR)
+            == s
     }
 
     pub(crate) fn get_tail_index(&self, s: TrieIndex) -> TrieIndex {
@@ -542,11 +548,11 @@ pub(crate) extern "C" fn da_prune(mut d: NonNull<DArray>, s: TrieIndex) {
 #[deprecated(note = "Use d.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
 #[no_mangle]
 pub(crate) extern "C" fn da_first_separate(
-    mut d: NonNull<DArray>,
+    d: *const DArray,
     root: TrieIndex,
     mut keybuff: NonNull<TrieString>,
 ) -> TrieIndex {
-    let da = unsafe { d.as_mut() };
+    let da = unsafe { &*d };
     let keybuff = unsafe { keybuff.as_mut() };
     da.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR)
 }
@@ -554,12 +560,12 @@ pub(crate) extern "C" fn da_first_separate(
 #[deprecated(note = "Use d.next_separate(root, sep, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
 #[no_mangle]
 pub(crate) unsafe extern "C" fn da_next_separate(
-    mut d: NonNull<DArray>,
+    d: *const DArray,
     root: TrieIndex,
     sep: TrieIndex,
     mut keybuff: NonNull<TrieString>,
 ) -> TrieIndex {
-    let da = unsafe { d.as_mut() };
+    let da = unsafe { &*d };
     let keybuff = unsafe { keybuff.as_mut() };
     da.next_separate(root, sep, keybuff)
         .unwrap_or(TRIE_INDEX_ERROR)

@@ -114,6 +114,10 @@ impl Tail {
         None
     }
 
+    pub(crate) fn is_walkable_char(&self, s: TrieIndex, suffix_idx: i16, c: TrieChar) -> bool {
+        self.get_suffix(s).unwrap()[suffix_idx as usize] == c
+    }
+
     fn alloc_block(&mut self) -> TrieIndex {
         let block_idx;
         if self.first_free != 0 {
