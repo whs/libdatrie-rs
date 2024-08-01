@@ -110,12 +110,8 @@ impl AlphaMap {
                 if trie_char == TRIE_CHAR_TERM as TrieIndex {
                     trie_char += 1;
                 }
-                // Elide bond checks
-                unsafe {
-                    *alpha_to_trie_map.get_unchecked_mut((a - alpha_begin) as usize) =
-                        trie_char as TrieIndex;
-                    *trie_to_alpha_map.get_unchecked_mut(trie_char as usize) = a;
-                }
+                alpha_to_trie_map[(a - alpha_begin) as usize] = trie_char as TrieIndex;
+                trie_to_alpha_map[trie_char as usize] = a;
                 trie_char += 1;
             }
         }

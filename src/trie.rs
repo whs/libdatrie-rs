@@ -1,4 +1,3 @@
-use std::{cmp, io, iter, ptr, slice};
 use std::cell::Cell;
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
@@ -6,6 +5,7 @@ use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
+use std::{cmp, io, iter, ptr, slice};
 
 use ::libc;
 
@@ -13,7 +13,7 @@ use crate::alpha_map::AlphaMap;
 use crate::darray::{da_first_separate, da_next_separate, DArray};
 use crate::fileutils::wrap_cfile_nonnull;
 use crate::tail::Tail;
-use crate::trie_string::{TRIE_CHAR_TERM, TrieString};
+use crate::trie_string::{TrieString, TRIE_CHAR_TERM};
 use crate::types::*;
 
 extern "C" {
