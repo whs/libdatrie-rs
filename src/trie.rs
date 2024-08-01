@@ -649,7 +649,7 @@ pub extern "C" fn trie_state_walkable_chars(
     let copy_len = cmp::min(out.len(), chars.len());
     chars[..copy_len].copy_from_slice(&out[..copy_len]);
 
-    out.len() as i32
+    copy_len as i32
 }
 
 #[deprecated(note = "Use s.is_single()")]
