@@ -7,7 +7,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
 use crate::types::*;
-use crate::types::{TRIE_CHAR_TERM, TrieChar};
+use crate::types::{TrieChar, TRIE_CHAR_TERM};
 
 #[derive(Clone, Default)]
 pub struct AlphaMap {

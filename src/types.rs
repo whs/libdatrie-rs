@@ -23,17 +23,7 @@ impl From<bool> for Bool {
 
 impl Into<bool> for Bool {
     fn into(self) -> bool {
-        match self.0 {
-            1 => true,
-            0 => false,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl Into<u32> for Bool {
-    fn into(self) -> u32 {
-        self.0
+        self.0 == 1
     }
 }
 

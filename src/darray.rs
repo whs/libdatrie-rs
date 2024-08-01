@@ -1,12 +1,11 @@
 use std::io::{Read, Write};
-use std::ptr::NonNull;
 use std::{cmp, io};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::symbols::Symbols;
 use crate::types::*;
-use crate::types::{TRIE_CHAR_MAX, TrieChar};
+use crate::types::{TrieChar, TRIE_CHAR_MAX};
 
 #[derive(Default, Clone)]
 pub(crate) struct DACell {
@@ -490,30 +489,4 @@ impl Default for DArray {
             ],
         }
     }
-}
-
-#[deprecated(note = "Use d.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
-#[no_mangle]
-pub(crate) extern "C" fn da_first_separate(
-    d: *const DArray,
-    root: TrieIndex,
-    mut keybuff: NonNull<Vec<TrieChar>>,
-) -> TrieIndex {
-    let da = unsafe { &*d };
-    let keybuff = unsafe { keybuff.as_mut() };
-    da.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR)
-}
-
-#[deprecated(note = "Use d.next_separate(root, sep, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn da_next_separate(
-    d: *const DArray,
-    root: TrieIndex,
-    sep: TrieIndex,
-    mut keybuff: NonNull<Vec<TrieChar>>,
-) -> TrieIndex {
-    let da = unsafe { &*d };
-    let keybuff = unsafe { keybuff.as_mut() };
-    da.next_separate(root, sep, keybuff)
-        .unwrap_or(TRIE_INDEX_ERROR)
 }

@@ -697,7 +697,12 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
             )
         }
 
-        out.extend(tail_str.iter().copied().map_to_alpha_char(&state.trie.alpha_map));
+        out.extend(
+            tail_str
+                .iter()
+                .copied()
+                .map_to_alpha_char(&state.trie.alpha_map),
+        );
         out.push(0);
 
         Some(out)
