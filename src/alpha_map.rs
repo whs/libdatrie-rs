@@ -195,23 +195,3 @@ pub extern "C" fn alpha_map_add_range(
     am.add_range(begin..=end);
     0
 }
-
-#[deprecated(note = "Use alpha_map.char_to_trie()")]
-#[no_mangle]
-pub(crate) extern "C" fn alpha_map_char_to_trie(
-    alpha_map: *const AlphaMap,
-    ac: AlphaChar,
-) -> TrieIndex {
-    (unsafe { &*alpha_map })
-        .char_to_trie(ac)
-        .unwrap_or(TRIE_INDEX_MAX)
-}
-
-#[deprecated(note = "Use alpha_map.trie_to_char()")]
-#[no_mangle]
-pub(crate) extern "C" fn alpha_map_trie_to_char(
-    alpha_map: *const AlphaMap,
-    tc: TrieChar,
-) -> AlphaChar {
-    (unsafe { &*alpha_map }).trie_to_char(tc)
-}

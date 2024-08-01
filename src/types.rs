@@ -1,7 +1,7 @@
-use null_terminated::Nul;
 use std::cmp::Ordering;
-use std::ops::{Deref, Not};
 use std::slice;
+
+use null_terminated::Nul;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
@@ -21,16 +21,6 @@ impl From<bool> for Bool {
     }
 }
 
-impl From<i16> for Bool {
-    fn from(value: i16) -> Self {
-        match value {
-            1 => TRUE,
-            0 => FALSE,
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl Into<bool> for Bool {
     fn into(self) -> bool {
         match self.0 {
@@ -44,22 +34,6 @@ impl Into<bool> for Bool {
 impl Into<u32> for Bool {
     fn into(self) -> u32 {
         self.0
-    }
-}
-
-impl Deref for Bool {
-    type Target = u32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Not for Bool {
-    type Output = bool;
-
-    fn not(self) -> Self::Output {
-        self.0 == 0
     }
 }
 

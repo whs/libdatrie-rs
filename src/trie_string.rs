@@ -1,24 +1,12 @@
-use std::ffi::CStr;
+use std::io;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
-use std::{io, slice};
 
 use ::libc;
 
 pub type TrieChar = u8;
 pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 pub const TRIE_CHAR_MAX: TrieChar = TrieChar::MAX;
-
-pub(crate) fn trie_char_strlen(key: *const TrieChar) -> usize {
-    unsafe { CStr::from_ptr(key.cast()) }.count_bytes()
-}
-
-/// Return a TrieChar string as slice, including the null byte
-pub(crate) fn trie_char_as_slice<'a>(str: *const TrieChar) -> &'a [TrieChar] {
-    let len = trie_char_strlen(str) + 1;
-
-    unsafe { slice::from_raw_parts(str, len) }
-}
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct TrieString {
@@ -93,33 +81,4 @@ impl Write for TrieString {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
-
-#[deprecated(note = "Use TrieString::default(). Note that it doesn't preallocate!")]
-#[no_mangle]
-pub(crate) extern "C" fn trie_string_new(n_elm: i32) -> *mut TrieString {
-    let ts = TrieString {
-        inner: Vec::with_capacity(n_elm as usize),
-        str_len: 0,
-    };
-    Box::into_raw(Box::new(ts))
-}
-
-#[no_mangle]
-pub(crate) unsafe extern "C" fn trie_string_free(ts: *mut TrieString) {
-    drop(Box::from_raw(ts))
-}
-
-#[deprecated(note = "Use ts.length()")]
-#[no_mangle]
-pub(crate) extern "C" fn trie_string_length(ts: *const TrieString) -> i32 {
-    let str = unsafe { &*ts };
-    str.length() as i32
-}
-
-#[deprecated(note = "Use ts.deref()")]
-#[no_mangle]
-pub(crate) extern "C" fn trie_string_get_val(ts: *const TrieString) -> *const libc::c_void {
-    let str = unsafe { &*ts };
-    str.deref().as_ptr().cast()
 }

@@ -273,20 +273,3 @@ impl Default for TailBlock {
         }
     }
 }
-
-#[deprecated(note = "Use t.get_suffix()")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_get_suffix(t: *const Tail, index: TrieIndex) -> *const TrieChar {
-    let tail = unsafe { &*t };
-    match tail.get_suffix(index) {
-        Some(v) => v.as_ptr(),
-        None => ptr::null(),
-    }
-}
-
-#[deprecated(note = "Use t.get_data().unwrap_or(TRIE_DATA_ERROR)")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_get_data(t: *const Tail, index: TrieIndex) -> TrieData {
-    let tail = unsafe { &*t };
-    tail.get_data(index).unwrap_or(TRIE_DATA_ERROR)
-}

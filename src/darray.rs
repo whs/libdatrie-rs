@@ -492,32 +492,6 @@ impl Default for DArray {
     }
 }
 
-#[deprecated(note = "Use d.get_base().unwrap_or(TRIE_INDEX_ERROR)")]
-#[no_mangle]
-pub(crate) extern "C" fn da_get_base(d: *const DArray, s: TrieIndex) -> TrieIndex {
-    let da = unsafe { &*d };
-    da.get_base(s).unwrap_or(TRIE_INDEX_ERROR)
-}
-
-#[deprecated(note = "Use Some(*s) = d.walk(s, c)")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn da_walk(d: *const DArray, s: *mut TrieIndex, c: TrieChar) -> Bool {
-    let da = unsafe { &*d };
-    if let Some(new_s) = da.walk(unsafe { *s }, c) {
-        unsafe {
-            *s = new_s;
-        }
-        return TRUE;
-    }
-    FALSE
-}
-
-#[deprecated(note = "Use d.output_symbols()")]
-pub(crate) unsafe fn da_output_symbols(d: *const DArray, s: TrieIndex) -> Symbols {
-    let da = unsafe { &*d };
-    da.output_symbols(s)
-}
-
 #[deprecated(note = "Use d.first_separate(root, keybuff).unwrap_or(TRIE_INDEX_ERROR")]
 #[no_mangle]
 pub(crate) extern "C" fn da_first_separate(

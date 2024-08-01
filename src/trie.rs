@@ -17,11 +17,8 @@ use crate::trie_string::{TrieString, TRIE_CHAR_TERM};
 use crate::types::*;
 
 extern "C" {
-    fn malloc(_: libc::c_ulong) -> *mut libc::c_void;
     fn free(_: *mut libc::c_void);
 }
-type size_t = libc::c_ulong;
-const NULL: libc::c_int = 0;
 
 pub type TrieChar = u8;
 
