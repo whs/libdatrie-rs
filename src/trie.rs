@@ -1,4 +1,3 @@
-use ::libc;
 use std::cell::Cell;
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
@@ -9,13 +8,14 @@ use std::path::Path;
 use std::ptr::NonNull;
 use std::{io, iter, ptr, slice};
 
+use ::libc;
+
 use crate::alpha_map::{alpha_map_char_to_trie, alpha_map_trie_to_char, AlphaMap};
 use crate::darray::{
-    da_first_separate, da_get_base, da_get_check, da_get_root, da_next_separate, da_output_symbols,
-    da_prune, da_set_base, da_walk, DArray,
+    da_first_separate, da_get_base, da_next_separate, da_output_symbols, da_walk, DArray,
 };
 use crate::fileutils::wrap_cfile_nonnull;
-use crate::tail::{tail_delete, tail_get_data, tail_get_suffix, tail_walk_char, Tail};
+use crate::tail::{tail_get_data, tail_get_suffix, Tail};
 use crate::trie_string::{
     trie_char_strlen, trie_string_free, trie_string_get_val, trie_string_length, trie_string_new,
     TrieString, TRIE_CHAR_TERM,
@@ -440,7 +440,7 @@ pub extern "C" fn trie_store_if_absent(
 
 #[no_mangle]
 pub extern "C" fn trie_delete(mut trie: NonNull<Trie>, key: *const AlphaChar) -> Bool {
-    let mut trie = unsafe { trie.as_mut() };
+    let trie = unsafe { trie.as_mut() };
     trie.delete(alpha_char_as_slice(key)).into()
 }
 
@@ -478,7 +478,7 @@ pub unsafe extern "C" fn trie_enumerate(
     };
 }
 
-#[deprecated(note="Use trie.root()")]
+#[deprecated(note = "Use trie.root()")]
 #[no_mangle]
 pub extern "C" fn trie_root<'a>(trie: *const Trie) -> *mut TrieState<'a> {
     let trie = unsafe { &*trie };
@@ -519,17 +519,36 @@ impl<'a> TrieState<'a> {
         self.index = self.trie().da.get_root();
         self.is_suffix = FALSE;
     }
-}
 
-#[deprecated(note = "Use TrieState.new()")]
-fn trie_state_new<'a>(
-    trie: *const Trie,
-    index: TrieIndex,
-    suffix_idx: i16,
-    is_suffix: i16,
-) -> *mut TrieState<'a> {
-    let ts = TrieState::new(unsafe { &*trie }, index, suffix_idx, is_suffix.into());
-    Box::into_raw(Box::new(ts))
+    pub fn walk(&mut self, c: AlphaChar) -> bool {
+        let Some(tc) = self.trie().alpha_map.char_to_trie(c) else {
+            return false;
+        };
+        if !self.is_suffix {
+            if let Some(next_idx) = self.trie().da.walk(self.index, tc as TrieChar) {
+                self.index = next_idx;
+                if self.trie().da.is_separate(self.index) {
+                    self.index = self.trie().da.get_tail_index(self.index);
+                    self.suffix_idx = 0;
+                    self.is_suffix = TRUE;
+                }
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            if let Some(next_idx) =
+                self.trie()
+                    .tail
+                    .walk_char(self.index, self.suffix_idx, tc as TrieChar)
+            {
+                self.suffix_idx = next_idx;
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
 }
 
 #[deprecated(note = "Use TrieState.clone_from()")]
@@ -550,41 +569,24 @@ pub extern "C" fn trie_state_clone(s: *const TrieState) -> *mut TrieState {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn trie_state_free(mut s: NonNull<TrieState>) {
+pub unsafe extern "C" fn trie_state_free(s: NonNull<TrieState>) {
     drop(Box::from_raw(s.as_ptr()))
 }
 
 #[deprecated(note = "Use s.rewind()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_state_rewind(mut s: NonNull<TrieState>) {
+pub extern "C" fn trie_state_rewind(mut s: NonNull<TrieState>) {
     let state = unsafe { s.as_mut() };
     state.rewind();
 }
 
+#[deprecated(note = "Use s.walk()")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_state_walk(mut s: *mut TrieState, mut c: AlphaChar) -> Bool {
-    let mut tc: TrieIndex = alpha_map_char_to_trie(&(*(*s).trie).alpha_map, c);
-    if 0x7fffffff as libc::c_int == tc {
-        return FALSE as Bool;
-    }
-    if !(*s).is_suffix {
-        let mut ret: Bool = DA_FALSE;
-        ret = da_walk(&(*(*s).trie).da, &mut (*s).index, tc as TrieChar);
-        if ret.into() && da_get_base(&(*(*s).trie).da, (*s).index) < 0 as libc::c_int {
-            (*s).index = -da_get_base(&(*(*s).trie).da, (*s).index);
-            (*s).suffix_idx = 0 as libc::c_int as libc::c_short;
-            (*s).is_suffix = TRUE;
-        }
-        return ret;
-    } else {
-        return tail_walk_char(
-            &(*(*s).trie).tail,
-            (*s).index,
-            &mut (*s).suffix_idx,
-            tc as TrieChar,
-        );
-    };
+pub extern "C" fn trie_state_walk(mut s: NonNull<TrieState>, c: AlphaChar) -> Bool {
+    let state = unsafe { s.as_mut() };
+    state.walk(c).into()
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn trie_state_is_walkable(mut s: *const TrieState, mut c: AlphaChar) -> Bool {
     let mut tc: TrieIndex = alpha_map_char_to_trie(&(*(*s).trie).alpha_map, c);

@@ -1,5 +1,4 @@
 use std::io::{Read, Write};
-use std::ptr::NonNull;
 use std::{io, ptr};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -290,37 +289,4 @@ pub(crate) extern "C" fn tail_get_suffix(t: *const Tail, index: TrieIndex) -> *c
 pub(crate) extern "C" fn tail_get_data(t: *const Tail, index: TrieIndex) -> TrieData {
     let tail = unsafe { &*t };
     tail.get_data(index).unwrap_or(TRIE_DATA_ERROR)
-}
-
-/// Delete suffix entry from the tail data.
-#[deprecated(note = "Use t.delete()")]
-#[no_mangle]
-pub(crate) extern "C" fn tail_delete(mut t: NonNull<Tail>, index: TrieIndex) {
-    let tail = unsafe { t.as_mut() };
-    tail.delete(index)
-}
-
-/// Walk in tail with a character
-///
-/// Walk in the tail data `t` at entry `s`, from given character position
-/// `*suffix_idx`, using given character `c`. If the walk is successful,
-/// it returns `TRUE`, and `*suffix_idx` is updated to the next character.
-/// Otherwise, it returns `FALSE`, and `*suffix_idx` is left unchanged.
-#[deprecated(note = "Use Some(*suffix_idx) = t.walk_char()")]
-#[no_mangle]
-pub(crate) unsafe extern "C" fn tail_walk_char(
-    t: *const Tail,
-    s: TrieIndex,
-    suffix_idx: *mut i16,
-    c: TrieChar,
-) -> Bool {
-    let tail = unsafe { &*t };
-
-    match tail.walk_char(s, *suffix_idx, c) {
-        Some(idx) => {
-            *suffix_idx = idx;
-            TRUE
-        }
-        None => FALSE,
-    }
 }
