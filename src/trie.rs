@@ -22,16 +22,14 @@ use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 #[cfg(feature = "cffi")]
 use crate::types_c::{Bool, FALSE, TRUE};
+use crate::types_c::{TrieData, TRIE_DATA_ERROR};
 
 pub type TrieChar = u8;
-
-pub type TrieData = i32;
-pub const TRIE_DATA_ERROR: TrieData = -1;
 
 pub struct Trie {
     alpha_map: AlphaMap,
     da: DArray,
-    tail: Tail,
+    tail: Tail<Option<TrieData>>,
     is_dirty: Cell<bool>,
 }
 
@@ -195,7 +193,7 @@ impl Trie {
 
         // found
         // unwrap as an assertion since this should never fail
-        Some(self.tail.get_data(s).unwrap())
+        Some(self.tail.get_data(s).copied().flatten().unwrap())
     }
 
     fn branch_in_branch(
@@ -586,7 +584,7 @@ impl<'a> TrieState<'a> {
             if let Some(index) = self.trie.da.walk(self.index, TRIE_CHAR_TERM) {
                 if self.trie.da.is_separate(index) {
                     let tail_index = self.trie.da.get_tail_index(index);
-                    return self.trie.tail.get_data(tail_index);
+                    return self.trie.tail.get_data(tail_index).copied().flatten();
                 }
             }
         } else {
@@ -595,7 +593,7 @@ impl<'a> TrieState<'a> {
                 .tail
                 .is_walkable_char(self.index, self.suffix_idx, TRIE_CHAR_TERM)
             {
-                return self.trie.tail.get_data(self.index);
+                return self.trie.tail.get_data(self.index).copied().flatten();
             }
         }
 
@@ -760,7 +758,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
             tail_index = state.index;
         }
 
-        state.trie.tail.get_data(tail_index)
+        state.trie.tail.get_data(tail_index).copied().flatten()
     }
 
     fn iter_next(&mut self) -> bool {

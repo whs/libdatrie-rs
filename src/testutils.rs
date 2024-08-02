@@ -4,6 +4,7 @@ use std::ops::Deref;
 use crate::alpha_map::AlphaMap;
 use crate::trie::Trie;
 use crate::types::AlphaCharToString;
+use crate::types_c::TrieData;
 
 pub fn en_alpha_map_new() -> AlphaMap {
     let mut en_map = AlphaMap::default();
@@ -63,7 +64,7 @@ pub static DICT: &[&str] = &[
 pub fn assert_dict_complete(trie: &Trie) {
     let mut found_set = BTreeSet::from_iter(DICT.iter().copied());
     for (key, data) in trie.iter() {
-        assert_eq!(data.expect("Failed to get data"), 1);
+        assert_eq!(data.expect("Failed to get data"), TrieData(1));
 
         let key_str = key.deref().ac_to_string().unwrap();
         found_set.remove(key_str.deref());

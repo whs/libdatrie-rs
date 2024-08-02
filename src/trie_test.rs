@@ -3,8 +3,9 @@ use std::io::Cursor;
 
 use crate::alpha_map::AlphaMap;
 use crate::testutils::*;
-use crate::trie::{Trie, TrieData};
+use crate::trie::Trie;
 use crate::types::{AlphaChar, AsAlphaChar};
+use crate::types_c::TrieData;
 
 // Ported from test_null_trie.c
 #[test]
@@ -26,13 +27,13 @@ fn test_byte_alpha() {
 
     println!("Storing key to test trie");
     let key = [0xff, 0xff, 0];
-    assert!(trie.store(&key, 1), "Failed to store key to test trie");
+    assert!(trie.store(&key, TrieData(1)), "Failed to store key to test trie");
 
     println!("Retrieving data from test trie");
     let data = trie
         .retrieve(&key)
         .expect("Failed to retrieve key from test trie");
-    assert_eq!(data, 1, "Incorrect TrieData received");
+    assert_eq!(data, TrieData(1), "Incorrect TrieData received");
 }
 
 // Ported from test_byte_list.c
@@ -47,8 +48,8 @@ fn test_byte_list() {
 
     println!("Storing entries to test trie");
     let source: HashMap<Vec<AlphaChar>, TrieData> = HashMap::from([
-        (vec!['1'.into(), '2'.into(), 0], 1),
-        (vec!['1'.into(), '2'.into(), '3'.into(), 0], 2),
+        (vec!['1'.into(), '2'.into(), 0], TrieData(1)),
+        (vec!['1'.into(), '2'.into(), '3'.into(), 0], TrieData(2)),
     ]);
     for (key, value) in &source {
         assert!(trie.store(key, *value), "Failed to store {:?}", key);
@@ -73,7 +74,7 @@ fn test_serialize() {
     // add/remove some words
     for word in DICT {
         assert!(
-            trie.store(&word.as_alphachar(), 1),
+            trie.store(&word.as_alphachar(), TrieData(1)),
             "Failed to store {}",
             word
         );
@@ -110,7 +111,7 @@ fn test_nonalpha() {
     println!("Adding data to trie");
     for word in DICT {
         assert!(
-            trie.store(&word.as_alphachar(), 1),
+            trie.store(&word.as_alphachar(), TrieData(1)),
             "Failed to store {}",
             word
         );
@@ -125,7 +126,7 @@ fn test_nonalpha() {
             word
         );
         assert!(
-            !trie.store(&word.as_alphachar(), 1),
+            !trie.store(&word.as_alphachar(), TrieData(1)),
             "Successfully stored {} which should not happen",
             word
         );

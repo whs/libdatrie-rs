@@ -46,7 +46,8 @@ typedef enum { DA_FALSE = 0, DA_TRUE = 1 } Bool;
 }
 
 fn ctest_generate() {
-    #[cfg(feature = "ctest")]{
+    #[cfg(feature = "ctest")]
+    {
         cc::Build::new()
             .include(".")
             .file("src/ctest/utils.c")

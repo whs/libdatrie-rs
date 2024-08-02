@@ -1,8 +1,8 @@
-use std::cmp::Ordering;
-use std::{iter, slice};
-
 #[cfg(feature = "cffi")]
 use null_terminated::Nul;
+use std::cmp::Ordering;
+use std::io::{Read, Write};
+use std::{io, iter, slice};
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
@@ -73,3 +73,17 @@ pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaCh
 pub type TrieChar = u8;
 pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 pub const TRIE_CHAR_MAX: TrieChar = TrieChar::MAX;
+
+pub trait TrieSerializable {
+    fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()>;
+
+    fn serialized_size(&self) -> usize {
+        let mut buf = Vec::new();
+        self.serialize(&mut buf).unwrap();
+        buf.len()
+    }
+}
+
+pub trait TrieDeserializable {
+    fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self> where Self: Sized;
+}

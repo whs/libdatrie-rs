@@ -3,20 +3,21 @@ use std::io::{Read, Write};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::trie::{TrieChar, TrieData, TRIE_DATA_ERROR};
+use crate::trie::TrieChar;
 use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
+use crate::types_c::TRIE_DATA_ERROR;
 
 #[derive(Default)]
-pub(crate) struct Tail {
-    tails: Vec<TailBlock>,
+pub(crate) struct Tail<TrieData> {
+    tails: Vec<TailBlock<TrieData>>,
     first_free: TrieIndex,
 }
 
 const TAIL_SIGNATURE: u32 = 0xdffcdffc;
 const TAIL_START_BLOCKNO: TrieIndex = 1;
 
-impl Tail {
+impl<TrieData: Default> Tail<TrieData> {
     pub(crate) fn get_suffix(&self, index: TrieIndex) -> Option<&[TrieChar]> {
         let index = index - TAIL_START_BLOCKNO;
         match self.tails.get(index as usize).map(|v| &v.suffix) {
@@ -42,15 +43,13 @@ impl Tail {
         new_block
     }
 
-    pub(crate) fn get_data(&self, index: TrieIndex) -> Option<TrieData> {
+    pub(crate) fn get_data(&self, index: TrieIndex) -> Option<&TrieData> {
         let index = index - TAIL_START_BLOCKNO;
-        self.tails.get(index as usize).map(|v| v.data).flatten()
+        self.tails.get(index as usize).map(|v| &v.data)
     }
 
-    pub(crate) fn set_data(&mut self, index: TrieIndex, data: Option<TrieData>) -> Option<()> {
+    pub(crate) fn set_data(&mut self, index: TrieIndex, data: TrieData) -> Option<()> {
         let index = index - TAIL_START_BLOCKNO;
-        // TRIE_DATA_ERROR in C is mapped to None
-        debug_assert_ne!(data, Some(TRIE_DATA_ERROR));
         match self.tails.get_mut(index as usize) {
             Some(block) => {
                 block.data = data;
@@ -155,7 +154,52 @@ impl Tail {
             self.first_free = block_idx as TrieIndex;
         }
     }
+}
 
+impl<TrieData: TrieSerializable> Tail<TrieData> {
+    pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
+        writer.write_u32::<BigEndian>(TAIL_SIGNATURE)?;
+        writer.write_i32::<BigEndian>(self.first_free)?;
+        writer.write_i32::<BigEndian>(self.tails.len() as i32)?;
+
+        for block in &self.tails {
+            writer.write_i32::<BigEndian>(block.next_free)?;
+            block.data.serialize(writer)?;
+
+            match &block.suffix {
+                None => {
+                    // write the length
+                    writer.write_i16::<BigEndian>(0)?;
+                }
+                Some(suffix) => {
+                    let length = suffix.len() - 1;
+                    writer.write_i16::<BigEndian>(length as i16)?;
+                    writer.write(&suffix[..length])?;
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn serialized_size(&self) -> usize {
+        // This could potentially just be size_of::<TailBlock> but
+        // to ensure compatibility with original code
+        // we explicitly type out each fields' expected types
+        const SIZE_OF_BLOCK: usize = size_of::<TrieIndex>() // next_free
+            + size_of::<i16>(); // length
+
+        size_of::<i32>() // TAIL_SIGNATURE
+            + size_of::<TrieIndex>() // first_free
+            + size_of::<TrieIndex>() // num_tails
+            + (SIZE_OF_BLOCK * self.tails.len() as usize)
+            + self.tails.iter().map(|block| {
+            block.suffix.as_ref().map(|suffix| suffix.len() - 1).unwrap_or(0) + block.data.serialized_size()
+        }).sum::<usize>()
+    }
+}
+
+impl<TrieData: TrieDeserializable + Default + Clone> Tail<TrieData> {
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         if reader.read_u32::<BigEndian>()? != TAIL_SIGNATURE {
             return Err(io::Error::new(
@@ -179,10 +223,7 @@ impl Tail {
 
         for block in &mut blocks {
             block.next_free = reader.read_i32::<BigEndian>()?;
-            block.data = match reader.read_i32::<BigEndian>()? {
-                TRIE_DATA_ERROR => None,
-                value => Some(value),
-            };
+            block.data = TrieData::deserialize(reader)?;
             block.suffix = None;
 
             let length = reader.read_i16::<BigEndian>()?;
@@ -202,73 +243,28 @@ impl Tail {
 
         Ok(tail)
     }
-
-    pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
-        writer.write_u32::<BigEndian>(TAIL_SIGNATURE)?;
-        writer.write_i32::<BigEndian>(self.first_free)?;
-        writer.write_i32::<BigEndian>(self.tails.len() as i32)?;
-
-        for block in &self.tails {
-            writer.write_i32::<BigEndian>(block.next_free)?;
-            match block.data {
-                Some(v) => writer.write_i32::<BigEndian>(v)?,
-                None => writer.write_i32::<BigEndian>(TRIE_DATA_ERROR)?,
-            }
-
-            match &block.suffix {
-                None => {
-                    // write the length
-                    writer.write_i16::<BigEndian>(0)?;
-                }
-                Some(suffix) => {
-                    let length = suffix.len() - 1;
-                    writer.write_i16::<BigEndian>(length as i16)?;
-                    writer.write(&suffix[..length])?;
-                }
-            };
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn serialized_size(&self) -> usize {
-        // This could potentially just be size_of::<TailBlock> but
-        // to ensure compatibility with original code
-        // we explicitly type out each fields' expected types
-        const SIZE_OF_BLOCK: usize = size_of::<TrieIndex>() // next_free
-            + size_of::<TrieData>() // data
-            + size_of::<i16>(); // length
-
-        size_of::<i32>() // TAIL_SIGNATURE
-            + size_of::<TrieIndex>() // first_free
-            + size_of::<TrieIndex>() // num_tails
-            + (SIZE_OF_BLOCK * self.tails.len() as usize)
-            + self.tails.iter().map(|block| {
-            block.suffix.as_ref().map(|suffix| suffix.len() - 1).unwrap_or(0)
-        }).sum::<usize>()
-    }
 }
 
 #[derive(Clone)]
-pub(crate) struct TailBlock {
+pub(crate) struct TailBlock<TrieData> {
     next_free: TrieIndex,
-    data: Option<TrieData>,
+    data: TrieData,
     suffix: Option<Box<[TrieChar]>>,
 }
 
-impl TailBlock {
+impl<TrieData: Default> TailBlock<TrieData> {
     fn reset(&mut self) {
         self.next_free = -1;
-        self.data = None;
+        self.data = Default::default();
         self.suffix = None;
     }
 }
 
-impl Default for TailBlock {
+impl<TrieData: Default> Default for TailBlock<TrieData> {
     fn default() -> Self {
         TailBlock {
             next_free: -1,
-            data: None,
+            data: Default::default(),
             suffix: None,
         }
     }
