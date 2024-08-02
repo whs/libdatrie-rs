@@ -9,6 +9,13 @@ pub mod trie;
 pub mod types;
 #[cfg(feature = "cffi")]
 mod types_c;
+
+#[cfg(test)]
+mod testutils;
+#[cfg(test)]
+mod trie_iter_test;
+#[cfg(test)]
+mod trie_test;
 // pub mod tests {
 //     pub mod test_byte_alpha;
 //     pub mod test_byte_list;

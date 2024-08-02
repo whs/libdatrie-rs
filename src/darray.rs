@@ -7,8 +7,7 @@ use crate::symbols::Symbols;
 use crate::types::*;
 use crate::types::{TrieChar, TRIE_CHAR_MAX};
 
-#[derive(Default, Clone)]
-pub(crate) struct DACell {
+struct DACell {
     base: TrieIndex,
     check: TrieIndex,
 }

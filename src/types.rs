@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::slice;
+use std::{iter, slice};
 
 #[cfg(feature = "cffi")]
 use null_terminated::Nul;
@@ -10,6 +10,40 @@ pub const TRIE_INDEX_ERROR: TrieIndex = 0;
 
 pub type AlphaChar = u32;
 pub const ALPHA_CHAR_ERROR: AlphaChar = AlphaChar::MAX;
+
+pub trait AsAlphaChar {
+    fn as_alphachar(&self) -> Vec<AlphaChar>;
+}
+
+impl AsAlphaChar for &str {
+    fn as_alphachar(&self) -> Vec<AlphaChar> {
+        self.chars()
+            .map(|v| v as AlphaChar)
+            .chain(iter::once(0))
+            .collect()
+    }
+}
+
+pub trait AlphaCharToString {
+    fn ac_to_string(&self) -> Option<String>;
+}
+
+impl AlphaCharToString for &[AlphaChar] {
+    fn ac_to_string(&self) -> Option<String> {
+        self.iter()
+            .map_while(|v| {
+                // Strip trailing null byte
+                if *v == 0 {
+                    return None;
+                }
+                if *v == ALPHA_CHAR_ERROR {
+                    return Some(None);
+                }
+                Some(char::from_u32(*v))
+            })
+            .collect()
+    }
+}
 
 #[cfg(feature = "cffi")]
 #[no_mangle]

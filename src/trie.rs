@@ -573,6 +573,14 @@ impl<'a> TrieState<'a> {
         self.is_suffix
     }
 
+    pub fn is_terminal(&self) -> bool {
+        self.is_walkable(0)
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        self.is_single() && self.is_terminal()
+    }
+
     pub fn get_data(&self) -> Option<TrieData> {
         if !self.is_suffix {
             if let Some(index) = self.trie.da.walk(self.index, TRIE_CHAR_TERM) {
