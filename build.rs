@@ -1,4 +1,6 @@
 extern crate cbindgen;
+#[cfg(feature = "ctest")]
+extern crate cc;
 
 use std::env;
 
@@ -43,8 +45,32 @@ typedef enum { DA_FALSE = 0, DA_TRUE = 1 } Bool;
         .write_to_file("trie.h");
 }
 
+fn ctest_generate() {
+    #[cfg(feature = "ctest")]{
+        cc::Build::new()
+            .include(".")
+            .file("src/ctest/utils.c")
+            .file("src/ctest/test_byte_alpha.c")
+            .file("src/ctest/test_byte_list.c")
+            .file("src/ctest/test_file.c")
+            .file("src/ctest/test_iterator.c")
+            .file("src/ctest/test_nonalpha.c")
+            .file("src/ctest/test_null_trie.c")
+            .file("src/ctest/test_serialization.c")
+            .file("src/ctest/test_store-retrieve.c")
+            .file("src/ctest/test_term_state.c")
+            .file("src/ctest/test_walk.c")
+            .compile("ctest");
+    }
+}
+
 fn main() {
     if env::var("CARGO_FEATURE_CFFI").is_ok() {
         cbindgen_generate();
+    }
+
+    // https://github.com/rust-lang/cargo/issues/4789
+    if env::var("CARGO_FEATURE_CTEST").is_ok() {
+        ctest_generate();
     }
 }

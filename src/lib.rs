@@ -1,3 +1,5 @@
+#![feature(proc_macro_hygiene)]
+
 #[cfg_attr(not(feature = "cffi"), deny(unsafe_code))]
 pub mod alpha_map;
 mod darray;
@@ -10,25 +12,11 @@ pub mod types;
 #[cfg(feature = "cffi")]
 mod types_c;
 
+#[cfg(all(test, feature = "ctest"))]
+mod ctest;
 #[cfg(test)]
 mod testutils;
 #[cfg(test)]
 mod trie_iter_test;
 #[cfg(test)]
 mod trie_test;
-// pub mod tests {
-//     pub mod test_byte_alpha;
-//     pub mod test_byte_list;
-//     pub mod test_file;
-//     pub mod test_iterator;
-//     pub mod test_nonalpha;
-//     pub mod test_null_trie;
-//     pub mod test_serialization;
-//     pub mod test_store_retrieve;
-//     pub mod test_term_state;
-//     pub mod test_walk;
-//     pub mod utils;
-// } // mod tests
-// pub mod tools {
-//     pub mod trietool;
-// } // mod tools
