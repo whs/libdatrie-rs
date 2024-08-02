@@ -8,9 +8,14 @@ license = "LGPL-2.1"
 default = ["cffi"]
 cffi = ["dep:libc", "dep:null-terminated", "dep:cstream"]
 ctest = ["dep:cc", "cffi"]
+bin = ["dep:clap", "clap/derive", "dep:regex"]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "trietool"
+required-features = ["bin"]
 
 [dependencies]
 libc = { version = "0.2", optional = true }
@@ -19,6 +24,8 @@ byteorder = "1"
 cstream = { version = "0.1.4", optional = true }
 rangemap = "1.5.1"
 arrayvec = "0.7.4"
+clap = { version = "4.5.13", optional = true }
+regex = { version = "1.10.5", optional = true }
 
 [dev-dependencies]
 serial_test = "3.1.1"
