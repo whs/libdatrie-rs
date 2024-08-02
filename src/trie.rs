@@ -21,19 +21,18 @@ use crate::tail::Tail;
 use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 #[cfg(feature = "cffi")]
-use crate::types_c::{Bool, FALSE, TRUE};
-use crate::types_c::{TrieData, TRIE_DATA_ERROR};
+use crate::types_c::{Bool, TrieData, FALSE, TRIE_DATA_ERROR, TRUE};
 
 pub type TrieChar = u8;
 
-pub struct Trie {
+pub struct Trie<TrieData: Default> {
     alpha_map: AlphaMap,
     da: DArray,
-    tail: Tail<Option<TrieData>>,
+    tail: Tail<TrieData>,
     is_dirty: Cell<bool>,
 }
 
-impl Trie {
+impl<TrieData: Default> Trie<TrieData> {
     /// Create a new empty trie object based on the given `alpha_map` alphabet
     /// set. The trie contents can then be added and deleted with trie.store() and
     /// trie.delete() respectively.
@@ -44,46 +43,6 @@ impl Trie {
             tail: Tail::default(),
             is_dirty: Cell::new(true),
         }
-    }
-
-    pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let mut fp = BufReader::new(File::open(path)?);
-        Self::from_reader(&mut fp)
-    }
-
-    /// Create a new trie and initialize its contents by reading from a reader.
-    /// This function guaranteed that only the trie has been read from the reader.
-    /// This can be useful for embedding trie index as part of file data.
-    pub fn from_reader<T: Read>(reader: &mut T) -> io::Result<Self> {
-        let alpha_map = AlphaMap::read(reader)?;
-        let da = DArray::read(reader)?;
-        let tail = Tail::read(reader)?;
-
-        Ok(Self {
-            alpha_map,
-            da,
-            tail,
-            is_dirty: Cell::new(false),
-        })
-    }
-
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-        let mut fp = BufWriter::new(File::create(path)?);
-        self.serialize(&mut fp)
-    }
-
-    pub fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
-        self.alpha_map.serialize(writer)?;
-        self.da.serialize(writer)?;
-        self.tail.serialize(writer)?;
-        self.is_dirty.set(false);
-        Ok(())
-    }
-
-    /// Returns size that would be occupied by a trie if it was
-    /// serialized into a binary blob or file.
-    pub fn serialized_size(&self) -> usize {
-        self.alpha_map.serialized_size() + self.da.serialized_size() + self.tail.serialized_size()
     }
 
     /// Check if the trie is dirty with some pending changes and needs saving
@@ -152,20 +111,16 @@ impl Trie {
         if !is_overwrite {
             return false;
         }
-        self.tail.set_data(t, Some(data));
+        self.tail.set_data(t, data);
         self.is_dirty.set(true);
         true
     }
 
-    pub fn root(&self) -> TrieState {
+    pub fn root(&self) -> TrieState<TrieData> {
         TrieState::new(self, self.da.get_root(), 0, false)
     }
 
-    pub fn iter(&self) -> TrieIterator {
-        TrieIterator::new_from_trie(self)
-    }
-
-    pub fn retrieve(&self, key: &[AlphaChar]) -> Option<TrieData> {
+    pub fn retrieve(&self, key: &[AlphaChar]) -> Option<&TrieData> {
         // walk through branches
         let mut s = self.da.get_root();
         let mut key_iter = key.iter().copied();
@@ -193,7 +148,7 @@ impl Trie {
 
         // found
         // unwrap as an assertion since this should never fail
-        Some(self.tail.get_data(s).copied().flatten().unwrap())
+        Some(self.tail.get_data(s).unwrap())
     }
 
     fn branch_in_branch(
@@ -211,7 +166,7 @@ impl Trie {
         }
 
         let new_tail = self.tail.add_suffix(Some(suffix.into()));
-        self.tail.set_data(new_tail, Some(data));
+        self.tail.set_data(new_tail, data);
         self.da.set_tail_index(new_da, new_tail);
 
         self.is_dirty.set(true);
@@ -302,10 +257,63 @@ impl Trie {
     }
 }
 
+impl<TrieData: TrieSerializable + Default> Trie<TrieData> {
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+        let mut fp = BufWriter::new(File::create(path)?);
+        self.serialize(&mut fp)
+    }
+
+    pub fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
+        self.alpha_map.serialize(writer)?;
+        self.da.serialize(writer)?;
+        self.tail.serialize(writer)?;
+        self.is_dirty.set(false);
+        Ok(())
+    }
+
+    /// Returns size that would be occupied by a trie if it was
+    /// serialized into a binary blob or file.
+    pub fn serialized_size(&self) -> usize {
+        self.alpha_map.serialized_size() + self.da.serialized_size() + self.tail.serialized_size()
+    }
+}
+
+impl<TrieData: TrieDeserializable + Default + Clone> Trie<TrieData> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let mut fp = BufReader::new(File::open(path)?);
+        Self::from_reader(&mut fp)
+    }
+
+    /// Create a new trie and initialize its contents by reading from a reader.
+    /// This function guaranteed that only the trie has been read from the reader.
+    /// This can be useful for embedding trie index as part of file data.
+    pub fn from_reader<T: Read>(reader: &mut T) -> io::Result<Self> {
+        let alpha_map = AlphaMap::read(reader)?;
+        let da = DArray::read(reader)?;
+        let tail = Tail::read(reader)?;
+
+        Ok(Self {
+            alpha_map,
+            da,
+            tail,
+            is_dirty: Cell::new(false),
+        })
+    }
+}
+
+impl<TrieData: Clone + Default> Trie<TrieData> {
+    pub fn iter(&self) -> TrieIterator<TrieData> {
+        TrieIterator::new_from_trie(self)
+    }
+}
+
+#[cfg(feature = "cffi")]
+pub(crate) type CTrie = Trie<Option<TrieData>>;
+
 #[deprecated(note = "Use Trie::new()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
+pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut CTrie {
     let trie = Trie::new(unsafe { &*alpha_map }.clone());
     Box::into_raw(Box::new(trie))
 }
@@ -313,7 +321,7 @@ pub extern "C" fn trie_new(alpha_map: *const AlphaMap) -> *mut Trie {
 #[deprecated(note = "Use Trie::from_file()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_new_from_file(path: *const libc::c_char) -> *mut Trie {
+pub extern "C" fn trie_new_from_file(path: *const libc::c_char) -> *mut CTrie {
     let str = unsafe { CStr::from_ptr(path) };
     let osstr = OsStr::from_bytes(str.to_bytes());
     let Ok(trie) = Trie::from_file(osstr) else {
@@ -325,7 +333,7 @@ pub extern "C" fn trie_new_from_file(path: *const libc::c_char) -> *mut Trie {
 #[deprecated(note = "Use Trie::from_reader()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_fread(file: NonNull<libc::FILE>) -> *mut Trie {
+pub extern "C" fn trie_fread(file: NonNull<libc::FILE>) -> *mut CTrie {
     let mut file = wrap_cfile_nonnull(file);
     let Ok(trie) = Trie::from_reader(&mut file) else {
         return ptr::null_mut();
@@ -335,14 +343,14 @@ pub extern "C" fn trie_fread(file: NonNull<libc::FILE>) -> *mut Trie {
 
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_free(trie: *mut Trie) {
+pub unsafe extern "C" fn trie_free(trie: *mut CTrie) {
     drop(Box::from_raw(trie))
 }
 
 #[deprecated(note = "Use trie.save()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_save(mut trie: NonNull<Trie>, path: *const libc::c_char) -> i32 {
+pub extern "C" fn trie_save(mut trie: NonNull<CTrie>, path: *const libc::c_char) -> i32 {
     let trie = unsafe { trie.as_mut() };
     let str = unsafe { CStr::from_ptr(path) };
     let osstr = OsStr::from_bytes(str.to_bytes());
@@ -355,7 +363,7 @@ pub extern "C" fn trie_save(mut trie: NonNull<Trie>, path: *const libc::c_char) 
 #[deprecated(note = "Use trie.serialized_size()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_get_serialized_size(trie: *const Trie) -> libc::size_t {
+pub extern "C" fn trie_get_serialized_size(trie: *const CTrie) -> libc::size_t {
     let trie = unsafe { &*trie };
     trie.serialized_size()
 }
@@ -363,7 +371,7 @@ pub extern "C" fn trie_get_serialized_size(trie: *const Trie) -> libc::size_t {
 #[deprecated(note = "Use trie.serialize()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_serialize(mut trie: NonNull<Trie>, ptr: *mut u8) {
+pub extern "C" fn trie_serialize(mut trie: NonNull<CTrie>, ptr: *mut u8) {
     // Seems that this doesn't actually move the pointer?
     let trie = unsafe { trie.as_mut() };
     let slice = unsafe { slice::from_raw_parts_mut(ptr, trie.serialized_size()) };
@@ -374,7 +382,7 @@ pub extern "C" fn trie_serialize(mut trie: NonNull<Trie>, ptr: *mut u8) {
 #[deprecated(note = "Use trie.serialize()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_fwrite(mut trie: NonNull<Trie>, file: NonNull<libc::FILE>) -> i32 {
+pub extern "C" fn trie_fwrite(mut trie: NonNull<CTrie>, file: NonNull<libc::FILE>) -> i32 {
     let trie = unsafe { trie.as_mut() };
     let mut file = wrap_cfile_nonnull(file);
     match trie.serialize(&mut file) {
@@ -386,7 +394,7 @@ pub extern "C" fn trie_fwrite(mut trie: NonNull<Trie>, file: NonNull<libc::FILE>
 #[deprecated(note = "Use trie.is_dirty()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_is_dirty(trie: *const Trie) -> Bool {
+pub extern "C" fn trie_is_dirty(trie: *const CTrie) -> Bool {
     let trie = unsafe { &*trie };
     trie.is_dirty().into()
 }
@@ -395,14 +403,14 @@ pub extern "C" fn trie_is_dirty(trie: *const Trie) -> Bool {
 #[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_retrieve(
-    trie: *const Trie,
+    trie: *const CTrie,
     key: *const AlphaChar,
     o_data: *mut TrieData,
 ) -> Bool {
     let trie = unsafe { &*trie };
     let key_slice = alpha_char_as_slice(key);
 
-    match trie.retrieve(key_slice) {
+    match trie.retrieve(key_slice).copied().flatten() {
         Some(v) => {
             if !o_data.is_null() {
                 unsafe {
@@ -419,33 +427,34 @@ pub extern "C" fn trie_retrieve(
 #[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_store(
-    mut trie: NonNull<Trie>,
+    mut trie: NonNull<CTrie>,
     key: *const AlphaChar,
     data: TrieData,
 ) -> Bool {
     let trie = unsafe { trie.as_mut() };
     let key_slice = alpha_char_as_slice(key);
 
-    trie.store_conditionally(key_slice, data, true).into()
+    trie.store_conditionally(key_slice, Some(data), true).into()
 }
 
 #[deprecated(note = "Use trie.store_if_absent()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_store_if_absent(
-    mut trie: NonNull<Trie>,
+    mut trie: NonNull<CTrie>,
     key: *const AlphaChar,
     data: TrieData,
 ) -> Bool {
     let trie = unsafe { trie.as_mut() };
     let key_slice = alpha_char_as_slice(key);
 
-    trie.store_conditionally(key_slice, data, false).into()
+    trie.store_conditionally(key_slice, Some(data), false)
+        .into()
 }
 
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_delete(mut trie: NonNull<Trie>, key: *const AlphaChar) -> Bool {
+pub extern "C" fn trie_delete(mut trie: NonNull<CTrie>, key: *const AlphaChar) -> Bool {
     let trie = unsafe { trie.as_mut() };
     trie.delete(alpha_char_as_slice(key)).into()
 }
@@ -456,7 +465,7 @@ pub type TrieEnumFunc = unsafe extern "C" fn(*const AlphaChar, TrieData, *mut li
 #[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_enumerate(
-    trie: *const Trie,
+    trie: *const CTrie,
     enum_func: TrieEnumFunc,
     user_data: *mut libc::c_void,
 ) -> Bool {
@@ -464,8 +473,14 @@ pub extern "C" fn trie_enumerate(
 
     let mut cont = true;
     for (key, data) in trie.iter() {
-        cont =
-            unsafe { enum_func(key.as_ptr(), data.unwrap_or(TRIE_DATA_ERROR), user_data).into() };
+        cont = unsafe {
+            enum_func(
+                key.as_ptr(),
+                data.flatten().unwrap_or(TRIE_DATA_ERROR),
+                user_data,
+            )
+            .into()
+        };
     }
 
     cont.into()
@@ -474,15 +489,15 @@ pub extern "C" fn trie_enumerate(
 #[deprecated(note = "Use trie.root()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_root<'a>(trie: *const Trie) -> *mut TrieState<'a> {
+pub extern "C" fn trie_root<'a>(trie: *const CTrie) -> *mut CTrieState<'a> {
     let trie = unsafe { &*trie };
     Box::into_raw(Box::new(trie.root()))
 }
 
 #[derive(Clone)]
-pub struct TrieState<'a> {
+pub struct TrieState<'a, TrieData: Default> {
     /// the corresponding trie
-    trie: &'a Trie,
+    trie: &'a Trie<TrieData>,
     /// index in double-array/tail structures
     index: TrieIndex,
     /// suffix character offset, if in suffix
@@ -491,8 +506,13 @@ pub struct TrieState<'a> {
     is_suffix: bool,
 }
 
-impl<'a> TrieState<'a> {
-    fn new(trie: &Trie, index: TrieIndex, suffix_idx: i16, is_suffix: bool) -> TrieState {
+impl<'a, TrieData: Default> TrieState<'a, TrieData> {
+    fn new(
+        trie: &Trie<TrieData>,
+        index: TrieIndex,
+        suffix_idx: i16,
+        is_suffix: bool,
+    ) -> TrieState<TrieData> {
         TrieState {
             trie,
             index,
@@ -579,12 +599,12 @@ impl<'a> TrieState<'a> {
         self.is_single() && self.is_terminal()
     }
 
-    pub fn get_data(&self) -> Option<TrieData> {
+    pub fn get_data(&self) -> Option<&TrieData> {
         if !self.is_suffix {
             if let Some(index) = self.trie.da.walk(self.index, TRIE_CHAR_TERM) {
                 if self.trie.da.is_separate(index) {
                     let tail_index = self.trie.da.get_tail_index(index);
-                    return self.trie.tail.get_data(tail_index).copied().flatten();
+                    return self.trie.tail.get_data(tail_index);
                 }
             }
         } else {
@@ -593,7 +613,7 @@ impl<'a> TrieState<'a> {
                 .tail
                 .is_walkable_char(self.index, self.suffix_idx, TRIE_CHAR_TERM)
             {
-                return self.trie.tail.get_data(self.index).copied().flatten();
+                return self.trie.tail.get_data(self.index);
             }
         }
 
@@ -601,10 +621,16 @@ impl<'a> TrieState<'a> {
     }
 }
 
+#[cfg(feature = "cffi")]
+pub(crate) type CTrieState<'a> = TrieState<'a, Option<TrieData>>;
+
 #[deprecated(note = "Use TrieState.clone_from()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_copy<'a>(mut dst: NonNull<TrieState<'a>>, src: *const TrieState<'a>) {
+pub extern "C" fn trie_state_copy<'a>(
+    mut dst: NonNull<CTrieState<'a>>,
+    src: *const CTrieState<'a>,
+) {
     let dst = unsafe { dst.as_mut() };
     let src = unsafe { &*src };
 
@@ -614,7 +640,7 @@ pub extern "C" fn trie_state_copy<'a>(mut dst: NonNull<TrieState<'a>>, src: *con
 #[deprecated(note = "Use TrieState.clone()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_clone(s: *const TrieState) -> *mut TrieState {
+pub extern "C" fn trie_state_clone(s: *const CTrieState) -> *mut CTrieState {
     let state = unsafe { &*s };
     let cloned = state.clone();
     Box::into_raw(Box::new(cloned))
@@ -622,14 +648,14 @@ pub extern "C" fn trie_state_clone(s: *const TrieState) -> *mut TrieState {
 
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_state_free(s: NonNull<TrieState>) {
+pub unsafe extern "C" fn trie_state_free(s: NonNull<CTrieState>) {
     drop(Box::from_raw(s.as_ptr()))
 }
 
 #[deprecated(note = "Use s.rewind()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_rewind(mut s: NonNull<TrieState>) {
+pub extern "C" fn trie_state_rewind(mut s: NonNull<CTrieState>) {
     let state = unsafe { s.as_mut() };
     state.rewind();
 }
@@ -637,7 +663,7 @@ pub extern "C" fn trie_state_rewind(mut s: NonNull<TrieState>) {
 #[deprecated(note = "Use s.walk()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_walk(mut s: NonNull<TrieState>, c: AlphaChar) -> Bool {
+pub extern "C" fn trie_state_walk(mut s: NonNull<CTrieState>, c: AlphaChar) -> Bool {
     let state = unsafe { s.as_mut() };
     state.walk(c).into()
 }
@@ -645,7 +671,7 @@ pub extern "C" fn trie_state_walk(mut s: NonNull<TrieState>, c: AlphaChar) -> Bo
 #[deprecated(note = "Use s.is_walkable()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_is_walkable(s: *const TrieState, c: AlphaChar) -> Bool {
+pub extern "C" fn trie_state_is_walkable(s: *const CTrieState, c: AlphaChar) -> Bool {
     let state = unsafe { &*s };
     state.is_walkable(c).into()
 }
@@ -654,7 +680,7 @@ pub extern "C" fn trie_state_is_walkable(s: *const TrieState, c: AlphaChar) -> B
 #[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn trie_state_walkable_chars(
-    s: *const TrieState,
+    s: *const CTrieState,
     chars: NonNull<AlphaChar>,
     chars_nelm: i32,
 ) -> i32 {
@@ -672,7 +698,7 @@ pub extern "C" fn trie_state_walkable_chars(
 #[deprecated(note = "Use s.is_single()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_is_single(s: *const TrieState) -> Bool {
+pub extern "C" fn trie_state_is_single(s: *const CTrieState) -> Bool {
     let state = unsafe { &*s };
     state.is_single().into()
 }
@@ -680,21 +706,25 @@ pub extern "C" fn trie_state_is_single(s: *const TrieState) -> Bool {
 #[deprecated(note = "Use s.get_data().unwrap_or(TRIE_DATA_ERROR)")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_get_data(s: *const TrieState) -> TrieData {
+pub extern "C" fn trie_state_get_data(s: *const CTrieState) -> TrieData {
     let Some(state) = (unsafe { s.as_ref() }) else {
         return TRIE_DATA_ERROR;
     };
-    state.get_data().unwrap_or(TRIE_DATA_ERROR)
+    state
+        .get_data()
+        .copied()
+        .flatten()
+        .unwrap_or(TRIE_DATA_ERROR)
 }
 
-pub struct TrieIterator<'trie: 'state, 'state> {
-    root: Cow<'state, TrieState<'trie>>,
-    state: Option<TrieState<'trie>>,
+pub struct TrieIterator<'trie: 'state, 'state, TrieData: Default + Clone> {
+    root: Cow<'state, TrieState<'trie, TrieData>>,
+    state: Option<TrieState<'trie, TrieData>>,
     key: Vec<TrieChar>,
 }
 
-impl<'trie, 'state> TrieIterator<'trie, 'state> {
-    pub fn new(root: &'state TrieState<'trie>) -> TrieIterator<'trie, 'state> {
+impl<'trie: 'state, 'state, TrieData: Default + Clone> TrieIterator<'trie, 'state, TrieData> {
+    pub fn new(root: &'state TrieState<'trie, TrieData>) -> TrieIterator<'trie, 'state, TrieData> {
         TrieIterator {
             root: Cow::Borrowed(root),
             state: None,
@@ -702,7 +732,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
         }
     }
 
-    pub fn new_from_trie(trie: &'trie Trie) -> TrieIterator<'trie, 'state> {
+    pub fn new_from_trie(trie: &'trie Trie<TrieData>) -> TrieIterator<'trie, 'state, TrieData> {
         TrieIterator {
             root: Cow::Owned(trie.root()),
             state: None,
@@ -744,7 +774,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
         Some(out)
     }
 
-    pub fn data(&self) -> Option<TrieData> {
+    pub fn data(&self) -> Option<&TrieData> {
         let state = self.state.as_ref()?;
 
         let tail_index;
@@ -758,7 +788,7 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
             tail_index = state.index;
         }
 
-        state.trie.tail.get_data(tail_index).copied().flatten()
+        state.trie.tail.get_data(tail_index)
     }
 
     fn iter_next(&mut self) -> bool {
@@ -798,35 +828,40 @@ impl<'trie, 'state> TrieIterator<'trie, 'state> {
     }
 }
 
-impl<'trie, 'state> Iterator for TrieIterator<'trie, 'state> {
+impl<'trie: 'state, 'state, TrieData: Default + Clone> Iterator
+    for TrieIterator<'trie, 'state, TrieData>
+{
     type Item = (Vec<AlphaChar>, Option<TrieData>);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter_next() {
-            true => Some((self.key().unwrap(), self.data())),
+            true => Some((self.key().unwrap(), self.data().cloned())),
             false => None,
         }
     }
 }
 
+#[cfg(feature = "cffi")]
+pub(crate) type CTrieIterator<'a, 'b> = TrieIterator<'a, 'b, Option<TrieData>>;
+
 #[deprecated(note = "Use TrieIterator::new()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_iterator_new(s: NonNull<TrieState>) -> *mut TrieIterator {
-    let i = TrieIterator::new(unsafe { s.as_ref() });
+pub extern "C" fn trie_iterator_new(s: NonNull<CTrieState>) -> *mut CTrieIterator {
+    let i = CTrieIterator::new(unsafe { s.as_ref() });
     Box::into_raw(Box::new(i))
 }
 
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub unsafe extern "C" fn trie_iterator_free(iter: NonNull<TrieIterator>) {
+pub unsafe extern "C" fn trie_iterator_free(iter: NonNull<CTrieIterator>) {
     drop(Box::from_raw(iter.as_ptr()))
 }
 
 #[deprecated(note = "Use iter as Iterator")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_iterator_next(mut iter: NonNull<TrieIterator>) -> Bool {
+pub extern "C" fn trie_iterator_next(mut iter: NonNull<CTrieIterator>) -> Bool {
     let iter = unsafe { iter.as_mut() };
     iter.iter_next().into()
 }
@@ -834,7 +869,7 @@ pub extern "C" fn trie_iterator_next(mut iter: NonNull<TrieIterator>) -> Bool {
 #[deprecated(note = "Use iter.key()")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_iterator_get_key(iter: *const TrieIterator) -> *mut AlphaChar {
+pub extern "C" fn trie_iterator_get_key(iter: *const CTrieIterator) -> *mut AlphaChar {
     let iter = unsafe { &*iter };
     match iter.key() {
         Some(key) => Box::into_raw(key.into_boxed_slice()).cast(),
@@ -845,7 +880,7 @@ pub extern "C" fn trie_iterator_get_key(iter: *const TrieIterator) -> *mut Alpha
 #[deprecated(note = "Use iter.data().unwrap_or(TRIE_DATA_ERROR)")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_iterator_get_data(iter: *const TrieIterator) -> TrieData {
+pub extern "C" fn trie_iterator_get_data(iter: *const CTrieIterator) -> TrieData {
     let iter = unsafe { &*iter };
-    iter.data().unwrap_or(TRIE_DATA_ERROR)
+    iter.data().copied().flatten().unwrap_or(TRIE_DATA_ERROR)
 }

@@ -11,7 +11,7 @@ fn test_iterator() {
     println!("Adding data to trie");
     for word in DICT {
         assert!(
-            trie.store(&word.as_alphachar(), TrieData(1)),
+            trie.store(&word.as_alphachar(), 1),
             "Failed to store {}",
             word
         );
@@ -29,11 +29,11 @@ fn test_term_state() {
 
     println!("Populating trie with test set");
     assert!(
-        trie.store(&"ab".as_alphachar(), TrieData(1)),
+        trie.store(&"ab".as_alphachar(), 1),
         "Failed to add key 'ab' data 1"
     );
     assert!(
-        trie.store(&"abc".as_alphachar(), TrieData(2)),
+        trie.store(&"abc".as_alphachar(), 2),
         "Failed to add key 'abc' data 2"
     );
 
@@ -50,7 +50,11 @@ fn test_term_state() {
         state.walk('b' as AlphaChar),
         "Failed to continue walking with 'b'"
     );
-    assert_eq!(state.get_data(), Some(TrieData(1)), "Retrieved data at 'ab' is not 1");
+    assert_eq!(
+        state.get_data(),
+        Some(&1),
+        "Retrieved data at 'ab' is not 1"
+    );
 
     println!("Try walking further with 'c'");
     assert!(
@@ -59,7 +63,7 @@ fn test_term_state() {
     );
     assert_eq!(
         state.get_data(),
-        Some(TrieData(2)),
+        Some(&2),
         "Retrieved data at 'abc' is not 2"
     );
 }
@@ -74,7 +78,7 @@ fn test_walk() {
     println!("Adding data to trie");
     for word in ["pool", "prize", "preview", "prepare", "produce", "progress"] {
         assert!(
-            trie.store(&word.as_alphachar(), TrieData(1)),
+            trie.store(&word.as_alphachar(), 1),
             "Failed to store {}",
             word
         );
@@ -132,7 +136,7 @@ fn test_walk() {
 
     // get key & data
     println!("Try getting data from (5)");
-    assert_eq!(t.get_data(), Some(TrieData(1)), "Mismatched data from (5)");
+    assert_eq!(t.get_data(), Some(&1), "Mismatched data from (5)");
 
     // walk s from (2) with 'r' to (6)
     println!("Try walking from (2) with 'r' to (6)");
@@ -170,7 +174,7 @@ fn test_walk() {
     assert!(t.is_terminal(), "(9) should be terminal, but isn't");
 
     println!("Try getting data from (5)");
-    assert_eq!(t.get_data(), Some(TrieData(1)), "Mismatched data from (9)");
+    assert_eq!(t.get_data(), Some(&1), "Mismatched data from (9)");
 
     // walk from u = s (6) with 'e' to (10)
     println!("Try walking from (6) with 'e' to (10)");
@@ -210,7 +214,7 @@ fn test_walk() {
     assert!(t.is_terminal(), "(14) should be terminal, but isn't");
 
     println!("Try getting data from (14)");
-    assert_eq!(t.get_data(), Some(TrieData(1)), "Mismatched data from (14)");
+    assert_eq!(t.get_data(), Some(&1), "Mismatched data from (14)");
 
     // walk from u (10) with "pare"
     println!("Try walking from (10) with 'p' to (15)");
@@ -238,7 +242,7 @@ fn test_walk() {
     assert!(t.is_terminal(), "(18) should be terminal, but isn't");
 
     println!("Try getting data from (18)");
-    assert_eq!(t.get_data(), Some(TrieData(1)), "Mismatched data from (18)");
+    assert_eq!(t.get_data(), Some(&1), "Mismatched data from (18)");
 
     // walk s from (6) with 'o' to (19)
     println!("Try walking from (6) with 'o' to (19)");
@@ -276,7 +280,7 @@ fn test_walk() {
     assert!(t.is_terminal(), "(23) should be terminal, but isn't");
 
     println!("Try getting data from (23)");
-    assert_eq!(t.get_data(), Some(TrieData(1)), "Mismatched data from (23)");
+    assert_eq!(t.get_data(), Some(&1), "Mismatched data from (23)");
 
     // walk from s (19) with "gress"
     println!("Try walking from (19) with 'g' to (24)");
@@ -308,5 +312,5 @@ fn test_walk() {
     assert!(s.is_terminal(), "(28) should be terminal, but isn't");
 
     println!("Try getting data from (28)");
-    assert_eq!(s.get_data(), Some(TrieData(1)), "Mismatched data from (28)");
+    assert_eq!(s.get_data(), Some(&1), "Mismatched data from (28)");
 }

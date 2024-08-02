@@ -27,13 +27,13 @@ fn test_byte_alpha() {
 
     println!("Storing key to test trie");
     let key = [0xff, 0xff, 0];
-    assert!(trie.store(&key, TrieData(1)), "Failed to store key to test trie");
+    assert!(trie.store(&key, 1), "Failed to store key to test trie");
 
     println!("Retrieving data from test trie");
     let data = trie
         .retrieve(&key)
         .expect("Failed to retrieve key from test trie");
-    assert_eq!(data, TrieData(1), "Incorrect TrieData received");
+    assert_eq!(*data, 1, "Incorrect TrieData received");
 }
 
 // Ported from test_byte_list.c
@@ -74,7 +74,7 @@ fn test_serialize() {
     // add/remove some words
     for word in DICT {
         assert!(
-            trie.store(&word.as_alphachar(), TrieData(1)),
+            trie.store(&word.as_alphachar(), 1),
             "Failed to store {}",
             word
         );
@@ -111,7 +111,7 @@ fn test_nonalpha() {
     println!("Adding data to trie");
     for word in DICT {
         assert!(
-            trie.store(&word.as_alphachar(), TrieData(1)),
+            trie.store(&word.as_alphachar(), 1),
             "Failed to store {}",
             word
         );
@@ -126,7 +126,7 @@ fn test_nonalpha() {
             word
         );
         assert!(
-            !trie.store(&word.as_alphachar(), TrieData(1)),
+            !trie.store(&word.as_alphachar(), 1),
             "Successfully stored {} which should not happen",
             word
         );

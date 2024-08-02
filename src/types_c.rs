@@ -28,17 +28,15 @@ impl Into<bool> for Bool {
     }
 }
 
-#[deprecated(note = "TRIE_DATA_ERROR is for FFI use")]
 #[repr(transparent)]
 #[derive(Default, Copy, Clone, PartialEq, Eq, Debug, Ord, PartialOrd)]
 pub struct TrieData(pub i32);
-#[deprecated(note = "TRIE_DATA_ERROR is for FFI use")]
 pub const TRIE_DATA_ERROR: TrieData = TrieData(-1);
 
 impl TrieSerializable for Option<TrieData> {
     fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
         match self {
-            Some((v)) => writer.write_i32::<BigEndian>(v.0),
+            Some(v) => writer.write_i32::<BigEndian>(v.0),
             None => writer.write_i32::<BigEndian>(-1),
         }
     }

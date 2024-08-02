@@ -1,3 +1,4 @@
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 #[cfg(feature = "cffi")]
 use null_terminated::Nul;
 use std::cmp::Ordering;
@@ -85,5 +86,26 @@ pub trait TrieSerializable {
 }
 
 pub trait TrieDeserializable {
-    fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self> where Self: Sized;
+    fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self>
+    where
+        Self: Sized;
+}
+
+impl TrieSerializable for i32 {
+    fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
+        writer.write_i32::<BigEndian>(*self)
+    }
+
+    fn serialized_size(&self) -> usize {
+        size_of::<i32>()
+    }
+}
+
+impl TrieDeserializable for i32 {
+    fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        reader.read_i32::<BigEndian>()
+    }
 }

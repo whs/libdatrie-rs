@@ -6,7 +6,6 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crate::trie::TrieChar;
 use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
-use crate::types_c::TRIE_DATA_ERROR;
 
 #[derive(Default)]
 pub(crate) struct Tail<TrieData> {
