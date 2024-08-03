@@ -1,9 +1,10 @@
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-#[cfg(feature = "cffi")]
-use null_terminated::Nul;
 use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::{io, iter, slice};
+
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+#[cfg(feature = "cffi")]
+use null_terminated::Nul;
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
@@ -107,5 +108,71 @@ impl TrieDeserializable for i32 {
         Self: Sized,
     {
         reader.read_i32::<BigEndian>()
+    }
+}
+
+impl<T> TrieSerializable for Option<T>
+where
+    T: TrieSerializable,
+{
+    fn serialize<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            Some(v) => {
+                writer.write_u8(1)?;
+                v.serialize(writer)
+            }
+            None => writer.write_u8(0),
+        }
+    }
+
+    fn serialized_size(&self) -> usize {
+        match self {
+            Some(v) => 1 + v.serialized_size(),
+            None => 1,
+        }
+    }
+}
+
+impl<T> TrieDeserializable for Option<T>
+where
+    T: TrieDeserializable,
+{
+    fn deserialize<R: Read>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        let exists = reader.read_u8()?;
+        match exists {
+            1 => Ok(Some(T::deserialize(reader)?)),
+            0 => Ok(None),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid exists byte",
+            )),
+        }
+    }
+}
+
+impl TrieSerializable for Vec<u8> {
+    fn serialize<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_u64::<BigEndian>(self.len() as u64)?;
+        writer.write(self)?;
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        size_of::<u64>() + self.len()
+    }
+}
+
+impl TrieDeserializable for Vec<u8> {
+    fn deserialize<R: Read>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        let len = reader.read_u64::<BigEndian>()? as usize;
+        let mut buf = vec![0; len];
+        reader.read_exact(&mut buf)?;
+        Ok(buf)
     }
 }

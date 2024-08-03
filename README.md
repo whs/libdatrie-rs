@@ -5,7 +5,18 @@ datrie is a [libdatrie](https://linux.thai.net/~thep/datrie/datrie.html) ported 
 This project is intended to be a drop in replacement for original libdatrie, except for unexported functions. It has
 been tested with original libdatrie's test.
 
-Using this library in Rust is possible, but in many places it expects and returns null terminated arrays
+Using this library in Rust is possible, but in many places it expects and returns null terminated arrays.
+There's `as_alphachar` and `ac_to_string` adapter provided for &str/String respectively, so at least it should be able
+to store strings. There's no proper reexport yet and things may move.
+
+Data types stored in Trie should implement the following traits:
+
+* Default
+* Clone
+* TrieSerializable if you want to save from file
+* TrieDeserializable if you want to load from file
+
+All these are supported out of the box for i32, Vec<u8> and `Option<T>` of any supporting types.
 
 ## Feature flags
 

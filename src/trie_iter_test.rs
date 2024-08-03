@@ -1,6 +1,5 @@
 use crate::testutils::{assert_dict_complete, en_trie_new, DICT};
 use crate::types::{AlphaChar, AsAlphaChar};
-use crate::types_c::TrieData;
 
 // Ported from test_iterator.c
 #[test]
