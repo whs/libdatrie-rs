@@ -152,7 +152,7 @@ impl AlphaMap {
     }
 }
 
-pub(crate) trait ToAlphaChars {
+pub trait ToAlphaChars {
     fn map_to_alpha_char(self, alpha_map: &AlphaMap) -> impl Iterator<Item = AlphaChar>;
 }
 
@@ -168,7 +168,7 @@ impl<T: Iterator<Item = TrieChar>> ToAlphaChars for T {
     }
 }
 
-pub(crate) trait ToTrieChar {
+pub trait ToTrieChar {
     fn map_to_trie_char(self, alpha_map: &AlphaMap) -> impl Iterator<Item = Option<TrieChar>>;
 }
 

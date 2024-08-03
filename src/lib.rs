@@ -1,5 +1,15 @@
 #![feature(proc_macro_hygiene)]
 
+pub use types::{
+    AlphaChar, AlphaCharToString, AsAlphaChar, TrieChar, TrieDeserializable, TrieIndex,
+    TrieSerializable, ALPHA_CHAR_ERROR, TRIE_CHAR_MAX, TRIE_CHAR_TERM, TRIE_INDEX_ERROR,
+    TRIE_INDEX_MAX,
+};
+
+pub use alpha_map::{AlphaMap, ToAlphaChars, ToTrieChar};
+
+pub use trie::{Trie, TrieIterator, TrieState};
+
 #[cfg_attr(not(feature = "cffi"), deny(unsafe_code))]
 pub mod alpha_map;
 mod darray;

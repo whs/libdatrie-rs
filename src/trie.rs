@@ -23,8 +23,6 @@ use crate::types::*;
 #[cfg(feature = "cffi")]
 use crate::types_c::{Bool, TrieData, FALSE, TRIE_DATA_ERROR, TRUE};
 
-pub type TrieChar = u8;
-
 pub struct Trie<TrieData: Default> {
     alpha_map: AlphaMap,
     da: DArray,

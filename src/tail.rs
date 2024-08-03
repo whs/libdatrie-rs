@@ -3,8 +3,6 @@ use std::io::{Read, Write};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::trie::TrieChar;
-use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 
 #[derive(Default)]
