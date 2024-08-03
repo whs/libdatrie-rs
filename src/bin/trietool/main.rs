@@ -1,7 +1,9 @@
 mod command_add;
 mod utils;
 
+use crate::utils::{load_trie, AutoSaveTrie};
 use clap::{Parser, Subcommand};
+use datrie::CTrieData;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -20,7 +22,10 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     #[command(about = "Add WORD with DATA to trie")]
-    Add { word: String, data: String },
+    Add {
+        #[arg(trailing_var_arg=true, value_names=["WORD", "DATA"])]
+        pairs: Vec<String>,
+    },
     #[command(about = "Add words and data listed in LIST_FILE to trie")]
     AddList {
         list_file: PathBuf,
@@ -43,10 +48,17 @@ pub enum Commands {
     List {},
 }
 
+pub struct Context {
+    trie: AutoSaveTrie<Option<CTrieData>>,
+}
+
 fn main() {
     let cli = Cli::parse();
+    let trie = load_trie(&cli);
+    let mut context = Context { trie };
+
     match cli.command {
-        ref Add => command_add::command(cli),
+        Commands::Add { pairs } => command_add::add(&mut context, pairs),
         _ => todo!(),
     }
 }

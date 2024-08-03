@@ -30,10 +30,10 @@ impl Into<bool> for Bool {
 
 #[repr(transparent)]
 #[derive(Default, Copy, Clone, PartialEq, Eq, Debug, Ord, PartialOrd)]
-pub struct TrieData(pub i32);
-pub const TRIE_DATA_ERROR: TrieData = TrieData(-1);
+pub struct CTrieData(pub i32);
+pub const TRIE_DATA_ERROR: CTrieData = CTrieData(-1);
 
-impl TrieSerializable for Option<TrieData> {
+impl TrieSerializable for Option<CTrieData> {
     fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
         match self {
             Some(v) => writer.write_i32::<BigEndian>(v.0),
@@ -42,11 +42,11 @@ impl TrieSerializable for Option<TrieData> {
     }
 }
 
-impl TrieDeserializable for Option<TrieData> {
+impl TrieDeserializable for Option<CTrieData> {
     fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self> {
         Ok(match reader.read_i32::<BigEndian>()? {
             -1 => None,
-            value => Some(TrieData(value)),
+            value => Some(CTrieData(value)),
         })
     }
 }

@@ -10,6 +10,11 @@ pub use alpha_map::{AlphaMap, ToAlphaChars, ToTrieChar};
 
 pub use trie::{Trie, TrieIterator, TrieState};
 
+#[cfg(feature = "cffi")]
+pub use types_c::CTrieData;
+#[cfg(feature = "cffi")]
+pub use types_c::TRIE_DATA_ERROR;
+
 #[cfg_attr(not(feature = "cffi"), deny(unsafe_code))]
 pub mod alpha_map;
 mod darray;

@@ -5,7 +5,7 @@ use crate::alpha_map::AlphaMap;
 use crate::testutils::*;
 use crate::trie::Trie;
 use crate::types::{AlphaChar, AsAlphaChar};
-use crate::types_c::TrieData;
+use crate::types_c::CTrieData;
 
 // Ported from test_null_trie.c
 #[test]
@@ -47,9 +47,9 @@ fn test_byte_list() {
     let mut trie = Trie::new(alpha_map);
 
     println!("Storing entries to test trie");
-    let source: HashMap<Vec<AlphaChar>, TrieData> = HashMap::from([
-        (vec!['1'.into(), '2'.into(), 0], TrieData(1)),
-        (vec!['1'.into(), '2'.into(), '3'.into(), 0], TrieData(2)),
+    let source: HashMap<Vec<AlphaChar>, CTrieData> = HashMap::from([
+        (vec!['1'.into(), '2'.into(), 0], CTrieData(1)),
+        (vec!['1'.into(), '2'.into(), '3'.into(), 0], CTrieData(2)),
     ]);
     for (key, value) in &source {
         assert!(trie.store(key, *value), "Failed to store {:?}", key);

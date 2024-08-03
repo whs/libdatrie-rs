@@ -23,6 +23,7 @@ fn cbindgen_generate() {
         .rename_item("CTrie", "Trie")
         .rename_item("CTrieState", "TrieState")
         .rename_item("CTrieIterator", "TrieIterator")
+        .rename_item("CTrieData", "TrieData")
         .with_include("stdint.h")
         .with_include("stdbool.h")
         .with_include("stdio.h")

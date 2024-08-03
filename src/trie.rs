@@ -21,7 +21,7 @@ use crate::tail::Tail;
 use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 #[cfg(feature = "cffi")]
-use crate::types_c::{Bool, TrieData, FALSE, TRIE_DATA_ERROR, TRUE};
+use crate::types_c::{Bool, CTrieData, FALSE, TRIE_DATA_ERROR, TRUE};
 
 pub struct Trie<TrieData: Default> {
     alpha_map: AlphaMap,
@@ -306,7 +306,7 @@ impl<TrieData: Clone + Default> Trie<TrieData> {
 }
 
 #[cfg(feature = "cffi")]
-pub(crate) type CTrie = Trie<Option<TrieData>>;
+pub(crate) type CTrie = Trie<Option<CTrieData>>;
 
 #[deprecated(note = "Use Trie::new()")]
 #[cfg(feature = "cffi")]
@@ -403,7 +403,7 @@ pub extern "C" fn trie_is_dirty(trie: *const CTrie) -> Bool {
 pub extern "C" fn trie_retrieve(
     trie: *const CTrie,
     key: *const AlphaChar,
-    o_data: *mut TrieData,
+    o_data: *mut CTrieData,
 ) -> Bool {
     let trie = unsafe { &*trie };
     let key_slice = alpha_char_as_slice(key);
@@ -427,7 +427,7 @@ pub extern "C" fn trie_retrieve(
 pub extern "C" fn trie_store(
     mut trie: NonNull<CTrie>,
     key: *const AlphaChar,
-    data: TrieData,
+    data: CTrieData,
 ) -> Bool {
     let trie = unsafe { trie.as_mut() };
     let key_slice = alpha_char_as_slice(key);
@@ -441,7 +441,7 @@ pub extern "C" fn trie_store(
 pub extern "C" fn trie_store_if_absent(
     mut trie: NonNull<CTrie>,
     key: *const AlphaChar,
-    data: TrieData,
+    data: CTrieData,
 ) -> Bool {
     let trie = unsafe { trie.as_mut() };
     let key_slice = alpha_char_as_slice(key);
@@ -458,7 +458,8 @@ pub extern "C" fn trie_delete(mut trie: NonNull<CTrie>, key: *const AlphaChar) -
 }
 
 #[cfg(feature = "cffi")]
-pub type TrieEnumFunc = unsafe extern "C" fn(*const AlphaChar, TrieData, *mut libc::c_void) -> Bool;
+pub type TrieEnumFunc =
+    unsafe extern "C" fn(*const AlphaChar, CTrieData, *mut libc::c_void) -> Bool;
 
 #[cfg(feature = "cffi")]
 #[no_mangle]
@@ -620,7 +621,7 @@ impl<'a, TrieData: Default> TrieState<'a, TrieData> {
 }
 
 #[cfg(feature = "cffi")]
-pub(crate) type CTrieState<'a> = TrieState<'a, Option<TrieData>>;
+pub(crate) type CTrieState<'a> = TrieState<'a, Option<CTrieData>>;
 
 #[deprecated(note = "Use TrieState.clone_from()")]
 #[cfg(feature = "cffi")]
@@ -704,7 +705,7 @@ pub extern "C" fn trie_state_is_single(s: *const CTrieState) -> Bool {
 #[deprecated(note = "Use s.get_data().unwrap_or(TRIE_DATA_ERROR)")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_state_get_data(s: *const CTrieState) -> TrieData {
+pub extern "C" fn trie_state_get_data(s: *const CTrieState) -> CTrieData {
     let Some(state) = (unsafe { s.as_ref() }) else {
         return TRIE_DATA_ERROR;
     };
@@ -840,7 +841,7 @@ impl<'trie: 'state, 'state, TrieData: Default + Clone> Iterator
 }
 
 #[cfg(feature = "cffi")]
-pub(crate) type CTrieIterator<'a, 'b> = TrieIterator<'a, 'b, Option<TrieData>>;
+pub(crate) type CTrieIterator<'a, 'b> = TrieIterator<'a, 'b, Option<CTrieData>>;
 
 #[deprecated(note = "Use TrieIterator::new()")]
 #[cfg(feature = "cffi")]
@@ -878,7 +879,7 @@ pub extern "C" fn trie_iterator_get_key(iter: *const CTrieIterator) -> *mut Alph
 #[deprecated(note = "Use iter.data().unwrap_or(TRIE_DATA_ERROR)")]
 #[cfg(feature = "cffi")]
 #[no_mangle]
-pub extern "C" fn trie_iterator_get_data(iter: *const CTrieIterator) -> TrieData {
+pub extern "C" fn trie_iterator_get_data(iter: *const CTrieIterator) -> CTrieData {
     let iter = unsafe { &*iter };
     iter.data().copied().flatten().unwrap_or(TRIE_DATA_ERROR)
 }

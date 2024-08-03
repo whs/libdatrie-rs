@@ -15,7 +15,7 @@ crate-type = ["cdylib", "lib"]
 
 [[bin]]
 name = "trietool"
-required-features = ["bin"]
+required-features = ["bin", "cffi"]
 
 [dependencies]
 libc = { version = "0.2", optional = true }
