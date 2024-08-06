@@ -86,7 +86,7 @@ impl<TrieData: Default> Trie<TrieData> {
 
         // walk through tail
         let sep = p;
-        let t = -self.da.get_tail_index(s);
+        let t = self.da.get_tail_index(s);
         let mut suffix_idx = 0;
         for ch in p.iter().copied() {
             let Some(tc) = self.alpha_map.char_to_trie(ch) else {
