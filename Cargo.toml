@@ -8,7 +8,7 @@ license = "LGPL-2.1"
 default = ["cffi"]
 cffi = ["dep:libc", "dep:null-terminated", "dep:cstream"]
 ctest = ["dep:cc", "cffi"]
-bin = ["dep:clap", "clap/derive", "dep:regex"]
+bin = ["dep:clap", "clap/derive", "dep:regex", "dep:iconv"]
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -26,6 +26,7 @@ rangemap = "1.5.1"
 arrayvec = "0.7.4"
 clap = { version = "4.5.13", optional = true }
 regex = { version = "1.10.5", optional = true }
+iconv = { version = "0.1.1", optional = true }
 
 [dev-dependencies]
 serial_test = "3.1.1"

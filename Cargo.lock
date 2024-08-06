@@ -232,12 +232,19 @@ dependencies = [
  "cc",
  "clap 4.5.13",
  "cstream",
+ "iconv",
  "libc",
  "null-terminated",
  "rangemap",
  "regex",
  "serial_test",
 ]
+
+[[package]]
+name = "dyn_buf"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74c57ab96715773d9cb9789b38eb7cbf04b3c6f5624a9d98f51761603376767c"
 
 [[package]]
 name = "errno"
@@ -356,6 +363,16 @@ version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "iconv"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07e6a7db0df823ef299ef75b6951975c7a1f9019910b3665614bac4161bab1a9"
+dependencies = [
+ "dyn_buf",
  "libc",
 ]
 

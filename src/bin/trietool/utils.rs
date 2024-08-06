@@ -1,15 +1,15 @@
-use std::{io, iter};
+use iconv::{Iconv, IconvError};
+use regex::Regex;
 use std::fs::File;
+use std::io;
 use std::io::{BufRead, BufReader, Read};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
-use regex::Regex;
-
-use datrie::{CTrieData, TrieDeserializable, TrieSerializable};
 use datrie::alpha_map::AlphaMap;
 use datrie::trie::Trie;
 use datrie::types::AlphaChar;
+use datrie::{CTrieData, TrieDeserializable, TrieSerializable};
 
 use crate::Cli;
 
@@ -34,7 +34,7 @@ pub fn load_trie(cli: &Cli) -> AutoSaveTrie<Option<CTrieData>> {
 pub fn load_abm<R: Read>(alpha_map: &mut AlphaMap, stream: &mut BufReader<R>) -> io::Result<()> {
     // format: [begin_char,end_char]
     // where begin_char and end_char is in hex values
-    let pattern = Regex::new(r"\s*\[\s*([0-9a-f]+)\s*,\s*([0-9a-f]+)\s*]").unwrap();
+    let pattern = Regex::new(r"\s*\[\s*(?:0x)*([0-9a-f]+)\s*,\s*(?:0x)*([0-9a-f]+)\s*]").unwrap();
 
     for line in stream.lines() {
         if let Some(captures) = pattern.captures(&line.unwrap()) {
@@ -42,9 +42,11 @@ pub fn load_abm<R: Read>(alpha_map: &mut AlphaMap, stream: &mut BufReader<R>) ->
             let end = captures.get(2).unwrap().as_str();
 
             let Ok(begin_ac) = AlphaChar::from_str_radix(begin, 16) else {
+                eprintln!("Failed to parse begin {}", begin);
                 continue;
             };
             let Ok(end_ac) = AlphaChar::from_str_radix(end, 16) else {
+                eprintln!("Failed to parse end {}", end);
                 continue;
             };
 
@@ -58,14 +60,6 @@ pub fn load_abm<R: Read>(alpha_map: &mut AlphaMap, stream: &mut BufReader<R>) ->
     }
 
     Ok(())
-}
-
-pub fn str_to_ucs4le(s: &str) -> Vec<AlphaChar> {
-    // This also add the null byte
-    s.chars()
-        .map(|c| c as u32 as AlphaChar)
-        .chain(iter::once(0))
-        .collect()
 }
 
 pub struct AutoSaveTrie<T: Default + Clone + TrieSerializable + TrieDeserializable> {
@@ -109,6 +103,38 @@ impl<T: Default + Clone + TrieSerializable + TrieDeserializable> Drop for AutoSa
     fn drop(&mut self) {
         if self.trie.is_dirty() {
             self.trie.save(&self.path).expect("Failed to save trie")
+        }
+    }
+}
+
+pub trait IconvExt {
+    fn decode(&mut self, input: &[u8]) -> Result<Vec<u8>, IconvError>;
+}
+
+impl IconvExt for Iconv {
+    fn decode(&mut self, input: &[u8]) -> Result<Vec<u8>, IconvError> {
+        let mut buf = vec![0; input.len()];
+        let mut read = 0;
+        let mut written = 0;
+        self.reset();
+        loop {
+            match self.convert(&input[read..], &mut buf[written..]) {
+                Ok((r, w, _)) => {
+                    read += r;
+                    written += w;
+                    if read >= input.len() {
+                        buf.truncate(written);
+                        return Ok(buf);
+                    }
+                    debug_assert!(!(r == 0 && w == 0));
+                }
+                Err((r, w, IconvError::NotSufficientOutput)) => {
+                    read += r;
+                    written += w;
+                    buf.resize(buf.len() + w, 0);
+                }
+                Err((_, _, e)) => return Err(e),
+            }
         }
     }
 }

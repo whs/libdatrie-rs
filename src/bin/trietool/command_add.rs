@@ -1,7 +1,9 @@
-use crate::utils::str_to_ucs4le;
-use crate::Context;
-use datrie::{CTrieData, TRIE_DATA_ERROR};
+use std::ops::Deref;
 use std::process::exit;
+
+use datrie::{AsAlphaChar, CTrieData, TRIE_DATA_ERROR};
+
+use crate::Context;
 
 pub fn add(context: &mut Context, words: Vec<String>) {
     if words.len() % 2 != 0 {
@@ -18,8 +20,7 @@ pub fn add(context: &mut Context, words: Vec<String>) {
             .map(|v| CTrieData(v))
             .unwrap_or(TRIE_DATA_ERROR);
 
-        // conv_to_alpha
-        let key = str_to_ucs4le(word);
+        let key = word.deref().as_alphachar();
         if !context.trie.store(&key, Some(data)) {
             eprintln!("Failed to add entry '{}' with data {}", word, data.0);
         }

@@ -1,4 +1,5 @@
 mod command_add;
+mod command_add_list;
 mod utils;
 
 use crate::utils::{load_trie, AutoSaveTrie};
@@ -30,7 +31,7 @@ pub enum Commands {
     AddList {
         list_file: PathBuf,
 
-        #[arg(long, help = "specify character encoding of LIST_FILE")]
+        #[arg(short, long, help = "specify character encoding of LIST_FILE")]
         encoding: Option<String>,
     },
     #[command(about = "Delete WORD from trie")]
@@ -39,7 +40,7 @@ pub enum Commands {
     DeleteList {
         list_file: PathBuf,
 
-        #[arg(long, help = "specify character encoding of LIST_FILE")]
+        #[arg(short, long, help = "specify character encoding of LIST_FILE")]
         encoding: Option<String>,
     },
     #[command(about = "Query WORD data from trie")]
@@ -59,6 +60,10 @@ fn main() {
 
     match cli.command {
         Commands::Add { pairs } => command_add::add(&mut context, pairs),
+        Commands::AddList {
+            list_file,
+            encoding,
+        } => command_add_list::add_list(&mut context, list_file, encoding),
         _ => todo!(),
     }
 }
