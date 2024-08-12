@@ -1,5 +1,7 @@
 mod command_add;
 mod command_add_list;
+mod command_delete;
+mod command_delete_list;
 mod command_list;
 mod command_query;
 mod utils;
@@ -37,7 +39,7 @@ pub enum Commands {
         encoding: Option<String>,
     },
     #[command(about = "Delete WORD from trie")]
-    Delete { word: String },
+    Delete { words: Vec<String> },
     #[command(about = "Delete words listed in LIST_FILE from trie")]
     DeleteList {
         list_file: PathBuf,
@@ -66,11 +68,11 @@ fn main() {
             list_file,
             encoding,
         } => command_add_list::add_list(&mut context, list_file, encoding),
-        Commands::Delete { word } => todo!(),
+        Commands::Delete { words } => command_delete::delete(&mut context, words),
         Commands::DeleteList {
             list_file,
             encoding,
-        } => todo!(),
+        } => command_delete_list::delete_list(&mut context, list_file, encoding),
         Commands::Query { word } => command_query::query(&context, word),
         Commands::List {} => command_list::list(&context),
     }

@@ -19,7 +19,7 @@ pub fn add_list(context: &mut Context, list_file: PathBuf, encoding: Option<Stri
     // the file format should be CSV or TSV-ish
     for line in input.split('\n' as u8) {
         let line = line.unwrap();
-        let split: Vec<&[u8]> = split_pattern.splitn(&line, 2).collect();
+        let split: Vec<&[u8]> = split_pattern.splitn(line.trim_ascii(), 2).collect();
 
         let key = split[0];
         let key_str = match encoder.as_mut() {
