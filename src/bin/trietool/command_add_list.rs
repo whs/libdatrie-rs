@@ -11,8 +11,11 @@ use crate::Context;
 
 pub fn add_list(context: &mut Context, list_file: PathBuf, encoding: Option<String>) {
     let split_pattern = regex::bytes::Regex::new(r"[\t,]").unwrap();
-    let mut encoder =
-        encoding.map(|v| Iconv::new(&v, "UTF-8").expect("Unable to create iconv encoder"));
+    let mut encoder = match encoding {
+        Some(v) if v.to_lowercase() == "utf-8" => None,
+        Some(v) => Some(Iconv::new(&v, "UTF-8").expect("Unable to create iconv encoder")),
+        None => None,
+    };
 
     let input = BufReader::new(File::open(&list_file).expect("Cannot open input file"));
 
