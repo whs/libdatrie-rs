@@ -408,11 +408,11 @@ pub extern "C" fn trie_retrieve(
     let trie = unsafe { &*trie };
     let key_slice = alpha_char_as_slice(key);
 
-    match trie.retrieve(key_slice).copied().flatten() {
+    match trie.retrieve(key_slice).copied() {
         Some(v) => {
             if !o_data.is_null() {
                 unsafe {
-                    o_data.write(v);
+                    o_data.write(v.unwrap_or(TRIE_DATA_ERROR));
                 }
             }
             TRUE

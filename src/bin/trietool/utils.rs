@@ -1,8 +1,8 @@
 use iconv::{Iconv, IconvError};
 use regex::Regex;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
@@ -28,7 +28,7 @@ pub fn load_trie(cli: &Cli) -> AutoSaveTrie<Option<CTrieData>> {
     let mut alpha_map = AlphaMap::default();
     load_abm(&mut alpha_map, &mut reader).expect("Fail to load alphabet map");
 
-    AutoSaveTrie::new(trie_path, alpha_map)
+    AutoSaveTrie::new(trie_path, alpha_map).expect("Failed to open file")
 }
 
 pub fn load_abm<R: Read>(alpha_map: &mut AlphaMap, stream: &mut BufReader<R>) -> io::Result<()> {
@@ -65,22 +65,26 @@ pub fn load_abm<R: Read>(alpha_map: &mut AlphaMap, stream: &mut BufReader<R>) ->
 pub struct AutoSaveTrie<T: Default + Clone + TrieSerializable + TrieDeserializable> {
     path: PathBuf,
     trie: Trie<T>,
+    file: File,
 }
 
 impl<T: Default + Clone + TrieSerializable + TrieDeserializable> AutoSaveTrie<T> {
-    pub fn new<P: AsRef<Path>>(path: P, alpha_map: AlphaMap) -> Self {
-        AutoSaveTrie {
+    pub fn new<P: AsRef<Path>>(path: P, alpha_map: AlphaMap) -> io::Result<Self> {
+        let file = OpenOptions::new().write(true).create(true).open(&path)?;
+        Ok(AutoSaveTrie {
             path: path.as_ref().to_path_buf(),
             trie: Trie::new(alpha_map),
-        }
+            file: file,
+        })
     }
 
     pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let mut fp = BufReader::new(File::open(&path)?);
+        let mut fp = BufReader::new(OpenOptions::new().read(true).write(true).open(&path)?);
         let trie = Trie::from_reader(&mut fp)?;
         Ok(AutoSaveTrie {
             path: path.as_ref().to_path_buf(),
             trie,
+            file: fp.into_inner(),
         })
     }
 }
@@ -102,7 +106,11 @@ impl<T: Default + Clone + TrieSerializable + TrieDeserializable> DerefMut for Au
 impl<T: Default + Clone + TrieSerializable + TrieDeserializable> Drop for AutoSaveTrie<T> {
     fn drop(&mut self) {
         if self.trie.is_dirty() {
-            self.trie.save(&self.path).expect("Failed to save trie")
+            self.file.set_len(0).expect("Failed to truncate");
+            self.file.seek(SeekFrom::Start(0)).expect("Failed to seek");
+            self.trie
+                .serialize(&mut self.file)
+                .expect("Failed to save trie");
         }
     }
 }

@@ -1,5 +1,7 @@
 mod command_add;
 mod command_add_list;
+mod command_list;
+mod command_query;
 mod utils;
 
 use crate::utils::{load_trie, AutoSaveTrie};
@@ -64,6 +66,12 @@ fn main() {
             list_file,
             encoding,
         } => command_add_list::add_list(&mut context, list_file, encoding),
-        _ => todo!(),
+        Commands::Delete { word } => todo!(),
+        Commands::DeleteList {
+            list_file,
+            encoding,
+        } => todo!(),
+        Commands::Query { word } => command_query::query(&context, word),
+        Commands::List {} => command_list::list(&context),
     }
 }
