@@ -31,6 +31,7 @@ check() {
 package_libdatrie-rs() {
   install -Dm0755 "target/release/libdatrie.so" "$pkgdir/usr/lib/libdatrie.so.1.4.0"
   install -Dm0644 "trie.h" "$pkgdir/usr/include/datrie/trie.h"
+  install -Dm0644 "datrie-0.2.pc" "$pkgdir/usr/share/pkgconfig/datrie-0.2.pc"
   ln -s "libdatrie.so.1.4.0" "$pkgdir/usr/lib/libdatrie.so"
   ln -s "libdatrie.so.1.4.0" "$pkgdir/usr/lib/libdatrie.so.1"
 }
