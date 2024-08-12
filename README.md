@@ -1,6 +1,6 @@
 # Datrie reimplementation in Rust
 
-datrie is a [libdatrie](https://linux.thai.net/~thep/datrie/datrie.html) ported with C2Rust and rewritten into safe Rust.
+libdatrie-rs is a [libdatrie](https://linux.thai.net/~thep/datrie/datrie.html) ported with C2Rust and rewritten into safe Rust.
 
 This project is intended to be a drop in replacement for original libdatrie, except for unexported functions. It has
 been tested with original libdatrie's test.

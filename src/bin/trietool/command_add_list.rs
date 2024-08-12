@@ -27,7 +27,7 @@ pub fn add_list(context: &mut Context, list_file: PathBuf, encoding: Option<Stri
                 let data = encoder.decode(key).expect("Failed to decode data");
                 unsafe { String::from_utf8_unchecked(data) }
             }
-            // XXX: In libthai this is current locale's encoding. Instead, we only support UTF-8
+            // XXX: In libdatrie this is current locale's encoding. Instead, we only support UTF-8
             None => String::from_utf8_lossy(key).to_string(),
         };
         let encoded_key = key_str.deref().as_alphachar();
