@@ -20,7 +20,10 @@ All these are supported out of the box for i32, Vec<u8> and `Option<T>` of any s
 
 ## Feature flags
 
-* cffi: Enable building of C binding. Without it the C comparison test will run (default on)
+* cffi: Enable building of C binding (default on)
+* ctest: Enable running C compatibility tests. These are the test from original libdatrie copied almost verbatim
+  to ensure that our trie.h is backwards compatible
+* bin: Enable building of trietool utility
 
 ## On speed
 
