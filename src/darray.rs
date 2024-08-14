@@ -1,5 +1,8 @@
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp;
+use std::io;
 use std::io::{Read, Write};
-use std::{cmp, io};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 

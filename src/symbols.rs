@@ -1,6 +1,6 @@
 use crate::types::TrieChar;
+use alloc::slice::Iter;
 use arrayvec::ArrayVec;
-use std::slice::Iter;
 
 #[derive(Debug, Default)]
 pub(crate) struct Symbols {

@@ -1,6 +1,10 @@
-use std::cmp::Ordering;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
+use core::{iter, slice};
+use std::io;
 use std::io::{Read, Write};
-use std::{io, iter, slice};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 #[cfg(feature = "cffi")]

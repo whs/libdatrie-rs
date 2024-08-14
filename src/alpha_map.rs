@@ -1,7 +1,12 @@
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::iter;
+use core::ops::RangeInclusive;
+use core::ptr;
+use core::ptr::NonNull;
+use std::io;
 use std::io::{Read, Write};
-use std::ops::RangeInclusive;
-use std::ptr::NonNull;
-use std::{io, iter, ptr};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;

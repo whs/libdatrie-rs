@@ -1,4 +1,7 @@
-#![feature(proc_macro_hygiene)]
+#![cfg_attr(not(feature = "std"), no_std)]
+//#![feature(proc_macro_hygiene)]
+
+extern crate alloc;
 
 pub use types::{
     AlphaChar, AlphaCharToString, AsAlphaChar, TrieChar, TrieDeserializable, TrieIndex,
@@ -29,9 +32,9 @@ mod types_c;
 
 #[cfg(all(test, feature = "ctest"))]
 mod ctest;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod testutils;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod trie_iter_test;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod trie_test;

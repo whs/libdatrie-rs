@@ -7,9 +7,10 @@ repository = "https://github.com/whs/libdatrie-rs"
 
 [features]
 default = ["cffi"]
-cffi = ["dep:libc", "dep:null-terminated", "dep:cstream"]
+cffi = ["std", "dep:libc", "dep:null-terminated", "dep:cstream"]
+std = ["byteorder/std", "arrayvec/std"]
 ctest = ["dep:cc", "cffi"]
-bin = ["dep:clap", "clap/derive", "dep:regex", "dep:iconv"]
+bin = ["std", "dep:clap", "clap/derive", "dep:regex", "dep:iconv"]
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -21,10 +22,10 @@ required-features = ["bin", "cffi"]
 [dependencies]
 libc = { version = "0.2", optional = true }
 null-terminated = { version = "0.3.17", optional = true }
-byteorder = "1"
+byteorder = { version = "1", default-features = false }
 cstream = { version = "0.1.4", optional = true }
 rangemap = "1.5.1"
-arrayvec = "0.7.4"
+arrayvec = { version = "0.7.4", default-features = false }
 clap = { version = "4.5.13", optional = true }
 regex = { version = "1.10.5", optional = true }
 iconv = { version = "0.1.1", optional = true }

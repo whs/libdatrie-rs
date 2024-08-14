@@ -1,14 +1,17 @@
-use std::borrow::Cow;
-use std::cell::Cell;
+use alloc::borrow::Cow;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::Cell;
+use core::ops::Deref;
+use core::ptr::NonNull;
+use core::{cmp, iter, ptr, slice};
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
+use std::io;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
-use std::ops::Deref;
 #[cfg(unix)]
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
-use std::ptr::NonNull;
-use std::{cmp, io, iter, ptr, slice};
 
 #[cfg(feature = "cffi")]
 use ::libc;
