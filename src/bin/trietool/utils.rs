@@ -62,13 +62,13 @@ pub fn load_abm<R: Read>(alpha_map: &mut AlphaMap, stream: &mut BufReader<R>) ->
     Ok(())
 }
 
-pub struct AutoSaveTrie<T: Default + Clone + TrieSerializable + TrieDeserializable> {
+pub struct AutoSaveTrie<T: Default + TrieSerializable + TrieDeserializable> {
     path: PathBuf,
     trie: Trie<T>,
     file: File,
 }
 
-impl<T: Default + Clone + TrieSerializable + TrieDeserializable> AutoSaveTrie<T> {
+impl<T: Default + TrieSerializable + TrieDeserializable> AutoSaveTrie<T> {
     pub fn new<P: AsRef<Path>>(path: P, alpha_map: AlphaMap) -> io::Result<Self> {
         let file = OpenOptions::new().write(true).create(true).open(&path)?;
         Ok(AutoSaveTrie {
@@ -89,7 +89,7 @@ impl<T: Default + Clone + TrieSerializable + TrieDeserializable> AutoSaveTrie<T>
     }
 }
 
-impl<T: Default + Clone + TrieSerializable + TrieDeserializable> Deref for AutoSaveTrie<T> {
+impl<T: Default + TrieSerializable + TrieDeserializable> Deref for AutoSaveTrie<T> {
     type Target = Trie<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -97,13 +97,13 @@ impl<T: Default + Clone + TrieSerializable + TrieDeserializable> Deref for AutoS
     }
 }
 
-impl<T: Default + Clone + TrieSerializable + TrieDeserializable> DerefMut for AutoSaveTrie<T> {
+impl<T: Default + TrieSerializable + TrieDeserializable> DerefMut for AutoSaveTrie<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.trie
     }
 }
 
-impl<T: Default + Clone + TrieSerializable + TrieDeserializable> Drop for AutoSaveTrie<T> {
+impl<T: Default + TrieSerializable + TrieDeserializable> Drop for AutoSaveTrie<T> {
     fn drop(&mut self) {
         if self.trie.is_dirty() {
             self.file.set_len(0).expect("Failed to truncate");

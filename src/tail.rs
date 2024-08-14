@@ -199,7 +199,7 @@ impl<TrieData: TrieSerializable> Tail<TrieData> {
     }
 }
 
-impl<TrieData: TrieDeserializable + Default + Clone> Tail<TrieData> {
+impl<TrieData: TrieDeserializable + Default> Tail<TrieData> {
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         if reader.read_u32::<BigEndian>()? != TAIL_SIGNATURE {
             return Err(io::Error::new(
@@ -218,13 +218,14 @@ impl<TrieData: TrieDeserializable + Default + Clone> Tail<TrieData> {
             ));
         }
 
-        // TODO: Consider using MaybeUninit
-        let mut blocks = vec![TailBlock::default(); num_tails as usize];
+        let mut blocks = Vec::with_capacity(num_tails as usize);
 
-        for block in &mut blocks {
-            block.next_free = reader.read_i32::<BigEndian>()?;
-            block.data = TrieData::deserialize(reader)?;
-            block.suffix = None;
+        for _ in 0..num_tails {
+            let mut block = TailBlock {
+                next_free: reader.read_i32::<BigEndian>()?,
+                data: TrieData::deserialize(reader)?,
+                suffix: None,
+            };
 
             let length = reader.read_i16::<BigEndian>()?;
             if length > 0 {
@@ -237,6 +238,8 @@ impl<TrieData: TrieDeserializable + Default + Clone> Tail<TrieData> {
                 // In the C version the reader always create suffix
                 block.suffix = Some(Box::new([TRIE_CHAR_TERM]));
             }
+
+            blocks.push(block);
         }
 
         tail.tails = blocks;

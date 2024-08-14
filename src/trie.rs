@@ -2,9 +2,9 @@ use alloc::borrow::Cow;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::Cell;
-use core::ops::Deref;
 use core::ptr::NonNull;
 use core::{cmp, iter, ptr, slice};
+use core::ops::Deref;
 use std::ffi::{CStr, OsStr};
 use std::fs::File;
 use std::io;
@@ -279,7 +279,7 @@ impl<TrieData: TrieSerializable + Default> Trie<TrieData> {
     }
 }
 
-impl<TrieData: TrieDeserializable + Default + Clone> Trie<TrieData> {
+impl<TrieData: TrieDeserializable + Default> Trie<TrieData> {
     pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut fp = BufReader::new(File::open(path)?);
         Self::from_reader(&mut fp)
@@ -302,7 +302,7 @@ impl<TrieData: TrieDeserializable + Default + Clone> Trie<TrieData> {
     }
 }
 
-impl<TrieData: Clone + Default> Trie<TrieData> {
+impl<TrieData: Default> Trie<TrieData> {
     pub fn iter(&self) -> TrieIterator<TrieData> {
         TrieIterator::new_from_trie(self)
     }
@@ -478,7 +478,7 @@ pub extern "C" fn trie_enumerate(
         cont = unsafe {
             enum_func(
                 key.as_ptr(),
-                data.flatten().unwrap_or(TRIE_DATA_ERROR),
+                data.copied().flatten().unwrap_or(TRIE_DATA_ERROR),
                 user_data,
             )
             .into()
@@ -496,7 +496,6 @@ pub extern "C" fn trie_root<'a>(trie: *const CTrie) -> *mut CTrieState<'a> {
     Box::into_raw(Box::new(trie.root()))
 }
 
-#[derive(Clone)]
 pub struct TrieState<'a, TrieData: Default> {
     /// the corresponding trie
     trie: &'a Trie<TrieData>,
@@ -623,6 +622,19 @@ impl<'a, TrieData: Default> TrieState<'a, TrieData> {
     }
 }
 
+impl<'a, TrieData: Default> Clone for TrieState<'a, TrieData> {
+    fn clone(&self) -> Self {
+        Self {
+            // If using derive(Clone), then it mandate that TrieData is cloneable
+            // even though we only wanted to copy the reference
+            trie: self.trie,
+            index: self.index,
+            suffix_idx: self.suffix_idx,
+            is_suffix: self.is_suffix,
+        }
+    }
+}
+
 #[cfg(feature = "cffi")]
 pub(crate) type CTrieState<'a> = TrieState<'a, Option<CTrieData>>;
 
@@ -719,13 +731,13 @@ pub extern "C" fn trie_state_get_data(s: *const CTrieState) -> CTrieData {
         .unwrap_or(TRIE_DATA_ERROR)
 }
 
-pub struct TrieIterator<'trie: 'state, 'state, TrieData: Default + Clone> {
+pub struct TrieIterator<'trie: 'state, 'state, TrieData: Default> {
     root: Cow<'state, TrieState<'trie, TrieData>>,
     state: Option<TrieState<'trie, TrieData>>,
     key: Vec<TrieChar>,
 }
 
-impl<'trie: 'state, 'state, TrieData: Default + Clone> TrieIterator<'trie, 'state, TrieData> {
+impl<'trie: 'state, 'state, TrieData: Default> TrieIterator<'trie, 'state, TrieData> {
     pub fn new(root: &'state TrieState<'trie, TrieData>) -> TrieIterator<'trie, 'state, TrieData> {
         TrieIterator {
             root: Cow::Borrowed(root),
@@ -830,14 +842,14 @@ impl<'trie: 'state, 'state, TrieData: Default + Clone> TrieIterator<'trie, 'stat
     }
 }
 
-impl<'trie: 'state, 'state, TrieData: Default + Clone> Iterator
+impl<'trie: 'state, 'state, TrieData: Default> Iterator
     for TrieIterator<'trie, 'state, TrieData>
 {
-    type Item = (Vec<AlphaChar>, Option<TrieData>);
+    type Item = (Vec<AlphaChar>, Option<&'state TrieData>);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter_next() {
-            true => Some((self.key().unwrap(), self.data().cloned())),
+            true => Some((self.key().unwrap(), self.data())),
             false => None,
         }
     }
