@@ -788,7 +788,7 @@ impl<'trie: 'state, 'state, TrieData: Default> TrieIterator<'trie, 'state, TrieD
         Some(out)
     }
 
-    pub fn data(&self) -> Option<&TrieData> {
+    pub fn data(&self) -> Option<&'state TrieData> {
         let state = self.state.as_ref()?;
 
         let tail_index;

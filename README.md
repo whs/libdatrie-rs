@@ -12,7 +12,6 @@ to store strings. There's no proper reexport yet and things may move.
 Data types stored in Trie should implement the following traits:
 
 * Default
-* Clone
 * TrieSerializable if you want to save from file
 * TrieDeserializable if you want to load from file
 

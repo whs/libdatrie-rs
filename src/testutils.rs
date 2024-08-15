@@ -65,7 +65,7 @@ pub static DICT: &[&str] = &[
 pub fn assert_dict_complete(trie: &TestTrie) {
     let mut found_set = BTreeSet::from_iter(DICT.iter().copied());
     for (key, data) in trie.iter() {
-        assert_eq!(data.expect("Failed to get data"), 1);
+        assert_eq!(data.copied().expect("Failed to get data"), 1);
 
         let key_str = key.deref().ac_to_string().unwrap();
         found_set.remove(key_str.deref());
