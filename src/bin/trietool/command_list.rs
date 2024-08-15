@@ -9,7 +9,7 @@ pub fn list(context: &Context) {
         println!(
             "{}\t{}",
             key.deref().ac_to_string().unwrap(),
-            value.flatten().unwrap_or(TRIE_DATA_ERROR).0
+            value.copied().flatten().unwrap_or(TRIE_DATA_ERROR).0
         )
     }
 }
