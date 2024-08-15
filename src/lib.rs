@@ -1,13 +1,13 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-//#![feature(proc_macro_hygiene)]
 
 extern crate alloc;
 
 pub use types::{
-    AlphaChar, AlphaCharToString, AsAlphaChar, TrieChar, TrieDeserializable, TrieIndex,
-    TrieSerializable, ALPHA_CHAR_ERROR, TRIE_CHAR_MAX, TRIE_CHAR_TERM, TRIE_INDEX_ERROR,
-    TRIE_INDEX_MAX,
+    AlphaChar, AlphaCharToString, AsAlphaChar, TrieChar, TrieIndex, ALPHA_CHAR_ERROR,
+    TRIE_CHAR_MAX, TRIE_CHAR_TERM, TRIE_INDEX_ERROR, TRIE_INDEX_MAX,
 };
+#[cfg(feature = "std")]
+pub use types::{TrieDeserializable, TrieSerializable};
 
 pub use alpha_map::{AlphaMap, ToAlphaChars, ToTrieChar};
 

@@ -1,9 +1,12 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
+#[cfg(feature = "std")]
 use std::io;
+#[cfg(feature = "std")]
 use std::io::{Read, Write};
 
+#[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::types::*;
@@ -156,6 +159,7 @@ impl<TrieData: Default> Tail<TrieData> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<TrieData: TrieSerializable> Tail<TrieData> {
     pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
         writer.write_u32::<BigEndian>(TAIL_SIGNATURE)?;
@@ -199,6 +203,7 @@ impl<TrieData: TrieSerializable> Tail<TrieData> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<TrieData: TrieDeserializable + Default> Tail<TrieData> {
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         if reader.read_u32::<BigEndian>()? != TAIL_SIGNATURE {

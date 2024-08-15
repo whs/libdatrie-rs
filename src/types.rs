@@ -3,9 +3,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::{iter, slice};
+#[cfg(feature = "std")]
 use std::io;
+#[cfg(feature = "std")]
 use std::io::{Read, Write};
 
+#[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 #[cfg(feature = "cffi")]
 use null_terminated::Nul;
@@ -23,6 +26,7 @@ pub trait AsAlphaChar {
 
 impl AsAlphaChar for &str {
     fn as_alphachar(&self) -> Vec<AlphaChar> {
+        // TODO: Throw error if the string has internal null bytes
         self.chars()
             .map(|v| v as AlphaChar)
             .chain(iter::once(0))
@@ -80,6 +84,7 @@ pub type TrieChar = u8;
 pub const TRIE_CHAR_TERM: TrieChar = '\0' as TrieChar;
 pub const TRIE_CHAR_MAX: TrieChar = TrieChar::MAX;
 
+#[cfg(feature = "std")]
 pub trait TrieSerializable {
     fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()>;
 
@@ -90,12 +95,14 @@ pub trait TrieSerializable {
     }
 }
 
+#[cfg(feature = "std")]
 pub trait TrieDeserializable {
     fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self>
     where
         Self: Sized;
 }
 
+#[cfg(feature = "std")]
 impl TrieSerializable for i32 {
     fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
         writer.write_i32::<BigEndian>(*self)
@@ -106,6 +113,7 @@ impl TrieSerializable for i32 {
     }
 }
 
+#[cfg(feature = "std")]
 impl TrieDeserializable for i32 {
     fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self>
     where
@@ -115,6 +123,7 @@ impl TrieDeserializable for i32 {
     }
 }
 
+#[cfg(feature = "std")]
 impl<T> TrieSerializable for Option<T>
 where
     T: TrieSerializable,
@@ -137,6 +146,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<T> TrieDeserializable for Option<T>
 where
     T: TrieDeserializable,
@@ -157,6 +167,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl TrieSerializable for Vec<u8> {
     fn serialize<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         writer.write_u64::<BigEndian>(self.len() as u64)?;
@@ -169,6 +180,7 @@ impl TrieSerializable for Vec<u8> {
     }
 }
 
+#[cfg(feature = "std")]
 impl TrieDeserializable for Vec<u8> {
     fn deserialize<R: Read>(reader: &mut R) -> io::Result<Self>
     where

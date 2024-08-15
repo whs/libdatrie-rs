@@ -1,3 +1,11 @@
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
+use datrie::CTrieData;
+
+use crate::utils::{load_trie, AutoSaveTrie};
+
 mod command_add;
 mod command_add_list;
 mod command_delete;
@@ -5,11 +13,6 @@ mod command_delete_list;
 mod command_list;
 mod command_query;
 mod utils;
-
-use crate::utils::{load_trie, AutoSaveTrie};
-use clap::{Parser, Subcommand};
-use datrie::CTrieData;
-use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(version, about)]

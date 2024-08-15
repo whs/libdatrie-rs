@@ -1,6 +1,8 @@
-use crate::Context;
-use datrie::{AsAlphaChar, TRIE_DATA_ERROR};
 use std::ops::Deref;
+
+use datrie::{AsAlphaChar, TRIE_DATA_ERROR};
+
+use crate::Context;
 
 pub fn query(context: &Context, key: String) {
     let alphachars = key.deref().as_alphachar();

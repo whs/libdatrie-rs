@@ -1,9 +1,12 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp;
+#[cfg(feature = "std")]
 use std::io;
+#[cfg(feature = "std")]
 use std::io::{Read, Write};
 
+#[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::symbols::Symbols;
@@ -411,6 +414,7 @@ impl DArray {
         }
     }
 
+    #[cfg(feature = "std")]
     pub(crate) fn read<T: Read>(reader: &mut T) -> io::Result<Self> {
         // check signature
         if reader.read_i32::<BigEndian>()? != DA_SIGNATURE as i32 {
@@ -445,6 +449,7 @@ impl DArray {
         Ok(Self { cells })
     }
 
+    #[cfg(feature = "std")]
     pub(crate) fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
         for cell in &self.cells {
             writer.write_i32::<BigEndian>(cell.base)?;

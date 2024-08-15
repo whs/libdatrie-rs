@@ -3,11 +3,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::iter;
 use core::ops::RangeInclusive;
-use core::ptr;
-use core::ptr::NonNull;
+#[cfg(feature = "std")]
 use std::io;
+#[cfg(feature = "std")]
 use std::io::{Read, Write};
 
+#[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rangemap::RangeInclusiveSet;
 
@@ -31,6 +32,7 @@ impl AlphaMap {
         self.recalc_work_area()
     }
 
+    #[cfg(feature = "std")]
     pub(crate) fn read<T: Read>(stream: &mut T) -> io::Result<Self> {
         // check signature
         if stream.read_u32::<BigEndian>()? != ALPHAMAP_SIGNATURE {
@@ -61,6 +63,7 @@ impl AlphaMap {
         Ok(alphamap)
     }
 
+    #[cfg(feature = "std")]
     pub(crate) fn serialize<T: Write>(&self, buf: &mut T) -> io::Result<()> {
         buf.write_u32::<BigEndian>(ALPHAMAP_SIGNATURE)?;
         buf.write_i32::<BigEndian>(self.ranges.len() as i32)?;
@@ -186,42 +189,45 @@ impl<T: Iterator<Item = AlphaChar>> ToTrieChar for T {
     }
 }
 
-#[deprecated(note = "Use AlphaMap::default()")]
 #[cfg(feature = "cffi")]
-#[no_mangle]
-pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
-    Box::into_raw(Box::new(AlphaMap::default()))
-}
+mod cffi {
+    use crate::alpha_map::*;
+    use std::ptr;
+    use std::ptr::NonNull;
 
-#[deprecated(note = "Use a_map::clone()")]
-#[cfg(feature = "cffi")]
-#[no_mangle]
-pub extern "C" fn alpha_map_clone(a_map: *const AlphaMap) -> *mut AlphaMap {
-    let Some(am) = (unsafe { a_map.as_ref() }) else {
-        return ptr::null_mut();
-    };
-
-    Box::into_raw(Box::new(am.clone()))
-}
-
-#[cfg(feature = "cffi")]
-#[no_mangle]
-pub unsafe extern "C" fn alpha_map_free(mut alpha_map: NonNull<AlphaMap>) {
-    drop(Box::from_raw(alpha_map.as_mut()))
-}
-
-#[deprecated(note = "Use alpha_map.add_range(begin..=end)")]
-#[cfg(feature = "cffi")]
-#[no_mangle]
-pub extern "C" fn alpha_map_add_range(
-    mut alpha_map: NonNull<AlphaMap>,
-    begin: AlphaChar,
-    end: AlphaChar,
-) -> i32 {
-    if begin > end {
-        return -1;
+    #[deprecated(note = "Use AlphaMap::default()")]
+    #[no_mangle]
+    pub extern "C" fn alpha_map_new() -> *mut AlphaMap {
+        Box::into_raw(Box::new(AlphaMap::default()))
     }
-    let am = unsafe { alpha_map.as_mut() };
-    am.add_range(begin..=end);
-    0
+
+    #[deprecated(note = "Use a_map::clone()")]
+    #[no_mangle]
+    pub extern "C" fn alpha_map_clone(a_map: *const AlphaMap) -> *mut AlphaMap {
+        let Some(am) = (unsafe { a_map.as_ref() }) else {
+            return ptr::null_mut();
+        };
+
+        Box::into_raw(Box::new(am.clone()))
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn alpha_map_free(mut alpha_map: NonNull<AlphaMap>) {
+        drop(Box::from_raw(alpha_map.as_mut()))
+    }
+
+    #[deprecated(note = "Use alpha_map.add_range(begin..=end)")]
+    #[no_mangle]
+    pub extern "C" fn alpha_map_add_range(
+        mut alpha_map: NonNull<AlphaMap>,
+        begin: AlphaChar,
+        end: AlphaChar,
+    ) -> i32 {
+        if begin > end {
+            return -1;
+        }
+        let am = unsafe { alpha_map.as_mut() };
+        am.add_range(begin..=end);
+        0
+    }
 }
