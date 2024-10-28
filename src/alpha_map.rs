@@ -54,7 +54,20 @@ impl AlphaMap {
             if begin > end {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid range"));
             }
-            alphamap.ranges.insert(begin..=end);
+            let range = begin..=end;
+            if range.clone().count() >= u8::MAX as usize {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "range too large",
+                ));
+            }
+            if range.clone().contains(&ALPHA_CHAR_ERROR) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "range include ALPHA_CHAR_ERROR",
+                ));
+            }
+            alphamap.ranges.insert(range);
         }
 
         // work area

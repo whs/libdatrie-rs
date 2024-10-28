@@ -426,10 +426,10 @@ impl DArray {
 
         // read number of cells
         let num_cells = reader.read_i32::<BigEndian>()?;
-        if num_cells as isize > isize::MAX {
+        if num_cells < 0 || num_cells as usize > (isize::MAX as usize) / size_of::<DACell>() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "cell count too large",
+                "invalid cells count",
             ));
         }
 
