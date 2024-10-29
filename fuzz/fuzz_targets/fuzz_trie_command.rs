@@ -95,7 +95,7 @@ fuzz_target!(|input: Input| {
                 trie.serialize(&mut buf).unwrap();
 
                 let mut buf_cursor = Cursor::new(&buf);
-                let new_trie = Trie::<Option<i32>>::from_reader(&mut buf_cursor).unwrap();
+                let mut new_trie = Trie::<Option<i32>>::from_reader(&mut buf_cursor).unwrap();
 
                 let mut new_buf: Vec<u8> = Vec::new();
                 new_trie.serialize(&mut new_buf).unwrap();

@@ -1,7 +1,6 @@
 use alloc::borrow::Cow;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::Cell;
 use core::iter;
 use core::ops::Deref;
 #[cfg(feature = "std")]
@@ -20,10 +19,8 @@ use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 
 pub struct Trie<TrieData: Default> {
-    alpha_map: AlphaMap,
-    da: DArray,
-    tail: Tail<TrieData>,
-    is_dirty: Cell<bool>,
+    ro: ROTrie<TrieData>,
+    is_dirty: bool,
 }
 
 impl<TrieData: Default> Trie<TrieData> {
@@ -32,17 +29,23 @@ impl<TrieData: Default> Trie<TrieData> {
     /// trie.delete() respectively.
     pub fn new(alpha_map: AlphaMap) -> Self {
         Self {
-            alpha_map,
-            da: DArray::default(),
-            tail: Tail::default(),
-            is_dirty: Cell::new(true),
+            ro: ROTrie::new(alpha_map),
+            is_dirty: true,
         }
+    }
+
+    pub fn from_ro(ro: ROTrie<TrieData>) -> Self {
+        Self { ro, is_dirty: true }
+    }
+
+    pub fn into_ro(self) -> ROTrie<TrieData> {
+        self.ro
     }
 
     /// Check if the trie is dirty with some pending changes and needs saving
     /// to keep the file synchronized.
     pub fn is_dirty(&self) -> bool {
-        self.is_dirty.get()
+        self.is_dirty
     }
 
     pub fn store(&mut self, key: &[AlphaChar], data: TrieData) -> bool {
@@ -60,16 +63,16 @@ impl<TrieData: Default> Trie<TrieData> {
         is_overwrite: bool,
     ) -> bool {
         // walk through branches
-        let mut s = self.da.get_root();
+        let mut s = self.ro.da.get_root();
         let mut p = key;
-        while !self.da.is_separate(s) {
-            let Some(tc) = self.alpha_map.char_to_trie(p[0]) else {
+        while !self.ro.da.is_separate(s) {
+            let Some(tc) = self.ro.alpha_map.char_to_trie(p[0]) else {
                 return false;
             };
-            if let Some(next_s) = self.da.walk(s, tc as TrieChar) {
+            if let Some(next_s) = self.ro.da.walk(s, tc as TrieChar) {
                 s = next_s;
             } else {
-                let Some(key_str) = self.alpha_map.char_to_trie_str(p) else {
+                let Some(key_str) = self.ro.alpha_map.char_to_trie_str(p) else {
                     return false;
                 };
                 return self.branch_in_branch(s, &key_str, data).into();
@@ -82,16 +85,16 @@ impl<TrieData: Default> Trie<TrieData> {
 
         // walk through tail
         let sep = p;
-        let t = self.da.get_tail_index(s);
+        let t = self.ro.da.get_tail_index(s);
         let mut suffix_idx = 0;
         for ch in p.iter().copied() {
-            let Some(tc) = self.alpha_map.char_to_trie(ch) else {
+            let Some(tc) = self.ro.alpha_map.char_to_trie(ch) else {
                 return false;
             };
-            if let Some(next_idx) = self.tail.walk_char(t, suffix_idx, tc as TrieChar) {
+            if let Some(next_idx) = self.ro.tail.walk_char(t, suffix_idx, tc as TrieChar) {
                 suffix_idx = next_idx;
             } else {
-                let Some(tail_str) = self.alpha_map.char_to_trie_str(sep) else {
+                let Some(tail_str) = self.ro.alpha_map.char_to_trie_str(sep) else {
                     return false;
                 };
                 return self.branch_in_tail(s, &tail_str, data).into();
@@ -105,9 +108,185 @@ impl<TrieData: Default> Trie<TrieData> {
         if !is_overwrite {
             return false;
         }
-        self.tail.set_data(t, data);
-        self.is_dirty.set(true);
+        self.ro.tail.set_data(t, data);
+        self.is_dirty = true;
         true
+    }
+
+    pub fn root(&self) -> TrieState<TrieData> {
+        self.ro.root()
+    }
+
+    pub fn retrieve(&self, key: &[AlphaChar]) -> Option<&TrieData> {
+        self.ro.retrieve(key)
+    }
+
+    fn branch_in_branch(
+        &mut self,
+        sep_node: TrieIndex,
+        suffix: &[TrieChar],
+        data: TrieData,
+    ) -> bool {
+        let mut suffix = suffix;
+        let Some(new_da) = self.ro.da.insert_branch(sep_node, suffix[0]) else {
+            return false;
+        };
+        if suffix[0] != TRIE_CHAR_TERM {
+            suffix = &suffix[1..];
+        }
+
+        let new_tail = self.ro.tail.add_suffix(Some(suffix.into()));
+        self.ro.tail.set_data(new_tail, data);
+        self.ro.da.set_tail_index(new_da, new_tail);
+
+        self.is_dirty = true;
+        true
+    }
+
+    fn branch_in_tail(&mut self, sep_node: TrieIndex, suffix: &[TrieChar], data: TrieData) -> bool {
+        // adjust separate point in old path
+        let old_tail = self.ro.da.get_tail_index(sep_node);
+        let Some(old_suffix) = self.ro.tail.get_suffix(old_tail) else {
+            return false;
+        };
+
+        let mut p = old_suffix;
+        let mut s = sep_node;
+        let mut suffix = suffix;
+        while p[0] == suffix[0] {
+            let Some(t) = self.ro.da.insert_branch(s, p[0]) else {
+                // TODO: Move to fail() code
+                self.ro.da.prune_upto(sep_node, s);
+                self.ro.da.set_tail_index(sep_node, old_tail);
+                return false;
+            };
+            s = t;
+
+            p = &p[1..];
+            suffix = &suffix[1..];
+        }
+
+        let Some(old_da) = self.ro.da.insert_branch(s, p[0]) else {
+            // TODO: Move to fail() code
+            self.ro.da.prune_upto(sep_node, s);
+            self.ro.da.set_tail_index(sep_node, old_tail);
+            return false;
+        };
+
+        if p[0] != TRIE_CHAR_TERM {
+            p = &p[1..];
+        }
+        self.ro.tail.set_suffix(old_tail, Some(p.into()));
+        self.ro.da.set_tail_index(old_da, old_tail);
+
+        // insert the new branch at the new separate point
+        self.branch_in_branch(s, suffix, data)
+    }
+
+    pub fn delete(&mut self, key: &[AlphaChar]) -> bool {
+        let mut s = self.ro.da.get_root();
+        let mut p = key;
+        while !self.ro.da.is_separate(s) {
+            let Some(tc) = self.ro.alpha_map.char_to_trie(p[0]) else {
+                return false;
+            };
+            if let Some(new_s) = self.ro.da.walk(s, tc as TrieChar) {
+                s = new_s;
+            } else {
+                return false;
+            }
+            if p[0] == 0 {
+                break;
+            }
+            p = &p[1..];
+        }
+
+        let t = self.ro.da.get_tail_index(s);
+        let mut suffix_idx = 0;
+
+        for ch in p.iter().copied() {
+            let Some(tc) = self.ro.alpha_map.char_to_trie(ch) else {
+                return false;
+            };
+            if let Some(new_idx) = self.ro.tail.walk_char(t, suffix_idx, tc as TrieChar) {
+                suffix_idx = new_idx;
+            } else {
+                return false;
+            }
+            if ch == 0 {
+                break;
+            }
+        }
+
+        self.ro.tail.delete(t);
+        self.ro.da.set_base(s, TRIE_INDEX_ERROR);
+        self.ro.da.prune(s);
+
+        self.is_dirty = true;
+        true
+    }
+
+    pub fn iter(&self) -> TrieIterator<TrieData> {
+        self.ro.iter()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<TrieData: TrieSerializable + Default> Trie<TrieData> {
+    #[cfg(feature = "std")]
+    pub fn save<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
+        let out = self.ro.save(path)?;
+        self.is_dirty = false;
+        Ok(out)
+    }
+
+    pub fn serialize<T: Write>(&mut self, writer: &mut T) -> io::Result<()> {
+        let out = self.ro.serialize(writer)?;
+        self.is_dirty = false;
+        Ok(out)
+    }
+
+    /// Returns size that would be occupied by a trie if it was
+    /// serialized into a binary blob or file.
+    pub fn serialized_size(&self) -> usize {
+        self.ro.serialized_size()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<TrieData: TrieDeserializable + Default> Trie<TrieData> {
+    #[cfg(feature = "std")]
+    pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let mut fp = BufReader::new(File::open(path)?);
+        Self::from_reader(&mut fp)
+    }
+
+    /// Create a new trie and initialize its contents by reading from a reader.
+    /// This function guaranteed that only the trie has been read from the reader.
+    /// This can be useful for embedding trie index as part of file data.
+    pub fn from_reader<T: Read>(reader: &mut T) -> io::Result<Self> {
+        let ro = ROTrie::from_reader(reader)?;
+
+        Ok(Self {
+            ro,
+            is_dirty: false,
+        })
+    }
+}
+
+pub struct ROTrie<TrieData: Default> {
+    alpha_map: AlphaMap,
+    da: DArray,
+    tail: Tail<TrieData>,
+}
+
+impl<TrieData: Default> ROTrie<TrieData> {
+    pub fn new(alpha_map: AlphaMap) -> Self {
+        Self {
+            alpha_map,
+            da: DArray::default(),
+            tail: Tail::default(),
+        }
     }
 
     pub fn root(&self) -> TrieState<TrieData> {
@@ -145,114 +324,13 @@ impl<TrieData: Default> Trie<TrieData> {
         Some(self.tail.get_data(s).unwrap())
     }
 
-    fn branch_in_branch(
-        &mut self,
-        sep_node: TrieIndex,
-        suffix: &[TrieChar],
-        data: TrieData,
-    ) -> bool {
-        let mut suffix = suffix;
-        let Some(new_da) = self.da.insert_branch(sep_node, suffix[0]) else {
-            return false;
-        };
-        if suffix[0] != TRIE_CHAR_TERM {
-            suffix = &suffix[1..];
-        }
-
-        let new_tail = self.tail.add_suffix(Some(suffix.into()));
-        self.tail.set_data(new_tail, data);
-        self.da.set_tail_index(new_da, new_tail);
-
-        self.is_dirty.set(true);
-        true
-    }
-
-    fn branch_in_tail(&mut self, sep_node: TrieIndex, suffix: &[TrieChar], data: TrieData) -> bool {
-        // adjust separate point in old path
-        let old_tail = self.da.get_tail_index(sep_node);
-        let Some(old_suffix) = self.tail.get_suffix(old_tail) else {
-            return false;
-        };
-
-        let mut p = old_suffix;
-        let mut s = sep_node;
-        let mut suffix = suffix;
-        while p[0] == suffix[0] {
-            let Some(t) = self.da.insert_branch(s, p[0]) else {
-                // TODO: Move to fail() code
-                self.da.prune_upto(sep_node, s);
-                self.da.set_tail_index(sep_node, old_tail);
-                return false;
-            };
-            s = t;
-
-            p = &p[1..];
-            suffix = &suffix[1..];
-        }
-
-        let Some(old_da) = self.da.insert_branch(s, p[0]) else {
-            // TODO: Move to fail() code
-            self.da.prune_upto(sep_node, s);
-            self.da.set_tail_index(sep_node, old_tail);
-            return false;
-        };
-
-        if p[0] != TRIE_CHAR_TERM {
-            p = &p[1..];
-        }
-        self.tail.set_suffix(old_tail, Some(p.into()));
-        self.da.set_tail_index(old_da, old_tail);
-
-        // insert the new branch at the new separate point
-        self.branch_in_branch(s, suffix, data)
-    }
-
-    pub fn delete(&mut self, key: &[AlphaChar]) -> bool {
-        let mut s = self.da.get_root();
-        let mut p = key;
-        while !self.da.is_separate(s) {
-            let Some(tc) = self.alpha_map.char_to_trie(p[0]) else {
-                return false;
-            };
-            if let Some(new_s) = self.da.walk(s, tc as TrieChar) {
-                s = new_s;
-            } else {
-                return false;
-            }
-            if p[0] == 0 {
-                break;
-            }
-            p = &p[1..];
-        }
-
-        let t = self.da.get_tail_index(s);
-        let mut suffix_idx = 0;
-
-        for ch in p.iter().copied() {
-            let Some(tc) = self.alpha_map.char_to_trie(ch) else {
-                return false;
-            };
-            if let Some(new_idx) = self.tail.walk_char(t, suffix_idx, tc as TrieChar) {
-                suffix_idx = new_idx;
-            } else {
-                return false;
-            }
-            if ch == 0 {
-                break;
-            }
-        }
-
-        self.tail.delete(t);
-        self.da.set_base(s, TRIE_INDEX_ERROR);
-        self.da.prune(s);
-
-        self.is_dirty.set(true);
-        true
+    pub fn iter(&self) -> TrieIterator<TrieData> {
+        TrieIterator::new_from_trie(self)
     }
 }
 
 #[cfg(feature = "std")]
-impl<TrieData: TrieSerializable + Default> Trie<TrieData> {
+impl<TrieData: TrieSerializable + Default> ROTrie<TrieData> {
     #[cfg(feature = "std")]
     pub fn save<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let mut fp = BufWriter::new(File::create(path)?);
@@ -263,7 +341,6 @@ impl<TrieData: TrieSerializable + Default> Trie<TrieData> {
         self.alpha_map.serialize(writer)?;
         self.da.serialize(writer)?;
         self.tail.serialize(writer)?;
-        self.is_dirty.set(false);
         Ok(())
     }
 
@@ -275,7 +352,7 @@ impl<TrieData: TrieSerializable + Default> Trie<TrieData> {
 }
 
 #[cfg(feature = "std")]
-impl<TrieData: TrieDeserializable + Default> Trie<TrieData> {
+impl<TrieData: TrieDeserializable + Default> ROTrie<TrieData> {
     #[cfg(feature = "std")]
     pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut fp = BufReader::new(File::open(path)?);
@@ -294,20 +371,13 @@ impl<TrieData: TrieDeserializable + Default> Trie<TrieData> {
             alpha_map,
             da,
             tail,
-            is_dirty: Cell::new(false),
         })
-    }
-}
-
-impl<TrieData: Default> Trie<TrieData> {
-    pub fn iter(&self) -> TrieIterator<TrieData> {
-        TrieIterator::new_from_trie(self)
     }
 }
 
 pub struct TrieState<'a, TrieData: Default> {
     /// the corresponding trie
-    trie: &'a Trie<TrieData>,
+    trie: &'a ROTrie<TrieData>,
     /// index in double-array/tail structures
     index: TrieIndex,
     /// suffix character offset, if in suffix
@@ -318,7 +388,7 @@ pub struct TrieState<'a, TrieData: Default> {
 
 impl<'a, TrieData: Default> TrieState<'a, TrieData> {
     fn new(
-        trie: &Trie<TrieData>,
+        trie: &ROTrie<TrieData>,
         index: TrieIndex,
         suffix_idx: i16,
         is_suffix: bool,
@@ -459,7 +529,7 @@ impl<'trie: 'state, 'state, TrieData: Default> TrieIterator<'trie, 'state, TrieD
         }
     }
 
-    pub fn new_from_trie(trie: &'trie Trie<TrieData>) -> TrieIterator<'trie, 'state, TrieData> {
+    pub fn new_from_trie(trie: &'trie ROTrie<TrieData>) -> TrieIterator<'trie, 'state, TrieData> {
         TrieIterator {
             root: Cow::Owned(trie.root()),
             state: None,

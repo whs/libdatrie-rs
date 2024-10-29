@@ -11,11 +11,9 @@ pub use types::{TrieDeserializable, TrieSerializable};
 
 pub use alpha_map::{AlphaMap, ToAlphaChars, ToTrieChar};
 
-pub use trie::{Trie, TrieIterator, TrieState};
+pub use trie::{ROTrie, Trie, TrieIterator, TrieState};
 
-#[cfg(feature = "cffi")]
 pub use types_c::CTrieData;
-#[cfg(feature = "cffi")]
 pub use types_c::TRIE_DATA_ERROR;
 
 #[cfg_attr(not(feature = "cffi"), deny(unsafe_code))]
@@ -27,7 +25,6 @@ mod symbols;
 mod tail;
 pub mod trie;
 pub mod types;
-#[cfg(feature = "cffi")]
 mod types_c;
 
 #[cfg(all(test, feature = "ctest"))]
