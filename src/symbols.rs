@@ -22,6 +22,7 @@ impl Symbols {
         self.symbols.insert(insertion_point, ch);
     }
 
+    #[allow(unused)]
     pub(crate) fn num(&self) -> usize {
         self.symbols.len()
     }

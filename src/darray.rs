@@ -13,11 +13,13 @@ use crate::symbols::Symbols;
 use crate::types::*;
 use crate::types::{TrieChar, TRIE_CHAR_MAX};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 struct DACell {
     base: TrieIndex,
     check: TrieIndex,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct DArray {
     cells: Vec<DACell>,
 }

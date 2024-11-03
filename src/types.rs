@@ -1,8 +1,11 @@
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+#[cfg(feature = "cffi")]
 use core::cmp::Ordering;
-use core::{iter, slice};
+use core::iter;
+#[cfg(feature = "cffi")]
+use core::slice;
 #[cfg(feature = "std")]
 use std::io;
 #[cfg(feature = "std")]

@@ -18,6 +18,7 @@ use crate::tail::Tail;
 use crate::types::TRIE_CHAR_TERM;
 use crate::types::*;
 
+#[derive(Clone, Debug)]
 pub struct Trie<TrieData: Default> {
     ro: ROTrie<TrieData>,
     is_dirty: bool,
@@ -274,6 +275,7 @@ impl<TrieData: TrieDeserializable + Default> Trie<TrieData> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ROTrie<TrieData: Default> {
     alpha_map: AlphaMap,
     da: DArray,

@@ -15,7 +15,7 @@ use rangemap::RangeInclusiveSet;
 use crate::types::*;
 use crate::types::{TrieChar, TRIE_CHAR_TERM};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AlphaMap {
     alpha_begin: AlphaChar,
     alpha_end: AlphaChar,

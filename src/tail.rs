@@ -11,7 +11,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::types::*;
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub(crate) struct Tail<TrieData> {
     tails: Vec<TailBlock<TrieData>>,
     first_free: TrieIndex,
@@ -74,6 +74,7 @@ impl<TrieData: Default> Tail<TrieData> {
     /// Return position after the last successful walk and the
     /// total number of character successfully walked.
     #[must_use]
+    #[allow(unused)]
     pub(crate) fn walk_str(&self, s: TrieIndex, suffix_idx: i16, str: &[TrieChar]) -> (i16, i32) {
         let Some(suffix) = self.get_suffix(s) else {
             return (suffix_idx, 0);
@@ -253,7 +254,7 @@ impl<TrieData: TrieDeserializable + Default> Tail<TrieData> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct TailBlock<TrieData> {
     next_free: TrieIndex,
     data: TrieData,
