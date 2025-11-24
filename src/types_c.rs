@@ -1,6 +1,10 @@
+#[cfg(feature = "std")]
 use crate::types::{TrieDeserializable, TrieSerializable};
+#[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+#[cfg(feature = "std")]
 use std::io;
+#[cfg(feature = "std")]
 use std::io::{Read, Write};
 
 /// cbindgen:ignore
@@ -33,6 +37,7 @@ impl Into<bool> for Bool {
 pub struct CTrieData(pub i32);
 pub const TRIE_DATA_ERROR: CTrieData = CTrieData(-1);
 
+#[cfg(feature = "std")]
 impl TrieSerializable for Option<CTrieData> {
     fn serialize<T: Write>(&self, writer: &mut T) -> io::Result<()> {
         match self {
@@ -42,6 +47,7 @@ impl TrieSerializable for Option<CTrieData> {
     }
 }
 
+#[cfg(feature = "std")]
 impl TrieDeserializable for Option<CTrieData> {
     fn deserialize<T: Read>(reader: &mut T) -> io::Result<Self> {
         Ok(match reader.read_i32::<BigEndian>()? {
