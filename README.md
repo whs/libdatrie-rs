@@ -49,4 +49,4 @@ It is currently unclear whether this library is faster or slower than the origin
 * Serialization code may be slower due to the use of generics
 
 ## License
-As a derivative work of libdatrie, this package is licensed under the [LGPL 2.1](LICENSE) license.
+As a derivative work of libdatrie, this package is licensed under the [LGPL 2.1+](LICENSE) license.
