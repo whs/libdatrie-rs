@@ -16,10 +16,10 @@ pub use trie::{ROTrie, Trie, TrieIterator, TrieState};
 pub use types_c::CTrieData;
 pub use types_c::TRIE_DATA_ERROR;
 
-#[cfg_attr(not(feature = "cffi"), deny(unsafe_code))]
+#[cfg_attr(not(feature = "capi"), deny(unsafe_code))]
 pub mod alpha_map;
 mod darray;
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 mod fileutils;
 mod symbols;
 mod tail;

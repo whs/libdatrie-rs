@@ -638,7 +638,7 @@ impl<'trie: 'state, 'state, TrieData: Default> Iterator for TrieIterator<'trie, 
     }
 }
 
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 mod cffi {
     use std::ffi::{CStr, OsStr};
     use std::io::Cursor;

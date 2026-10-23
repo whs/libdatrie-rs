@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 use core::cmp::Ordering;
 use core::iter;
 #[cfg(feature = "std")]
@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 
 #[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 use sentinel::SSlice;
 
 pub type TrieIndex = i32;
@@ -56,19 +56,19 @@ impl AlphaCharToString for &[AlphaChar] {
     }
 }
 
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 #[no_mangle]
 pub extern "C" fn alpha_char_strlen(str: *const AlphaChar) -> i32 {
     unsafe { SSlice::from_ptr(str) }.len() as i32
 }
 
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 /// Return an AlphaChar string as slice, including the null byte
 pub(crate) fn alpha_char_as_slice(str: *const AlphaChar) -> &'static [AlphaChar] {
     unsafe { SSlice::from_ptr(str) }.as_slice_with_sentinel()
 }
 
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 #[no_mangle]
 pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaChar) -> i32 {
     let str1 = unsafe { SSlice::from_ptr(str1) };

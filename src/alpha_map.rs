@@ -202,7 +202,7 @@ impl<T: Iterator<Item = AlphaChar>> ToTrieChar for T {
     }
 }
 
-#[cfg(feature = "cffi")]
+#[cfg(feature = "capi")]
 mod cffi {
     use crate::alpha_map::*;
     use std::ptr;

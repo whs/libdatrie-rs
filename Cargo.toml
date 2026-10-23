@@ -6,15 +6,15 @@ license = "LGPL-2.1-or-later"
 repository = "https://github.com/whs/libdatrie-rs"
 
 [features]
-default = ["cffi"]
-cffi = ["std", "dep:libc", "dep:sentinel", "dep:cstream", "sentinel/libc"]
+default = ["capi"]
+capi = ["std", "dep:libc", "dep:sentinel", "dep:cstream", "sentinel/libc"]
 std = ["byteorder/std", "arrayvec/std"]
-ctest = ["cffi"]
+ctest = ["capi"]
 bin = ["std", "dep:clap", "clap/derive", "dep:regex", "dep:iconv"]
 
 [[bin]]
 name = "trietool"
-required-features = ["bin", "cffi"]
+required-features = ["bin", "capi"]
 
 [dependencies]
 libc = { version = "0.2", optional = true }
