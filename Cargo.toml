@@ -9,11 +9,8 @@ repository = "https://github.com/whs/libdatrie-rs"
 default = ["cffi"]
 cffi = ["std", "dep:libc", "dep:sentinel", "dep:cstream", "sentinel/libc"]
 std = ["byteorder/std", "arrayvec/std"]
-ctest = ["dep:cc", "cffi"]
+ctest = ["cffi"]
 bin = ["std", "dep:clap", "clap/derive", "dep:regex", "dep:iconv"]
-
-[lib]
-crate-type = ["cdylib", "lib"]
 
 [[bin]]
 name = "trietool"
@@ -32,10 +29,29 @@ sentinel = {  version = "0.5.4", optional = true }
 
 [dev-dependencies]
 serial_test = "4.0.1"
+inline-c = "0.1.8"
 
-[build-dependencies]
-cbindgen = "0.29.4"
-cc = { version = "1.9.0", optional = true }
+[package.metadata.capi]
+min_version = "0.10.26"
+
+[package.metadata.capi.library]
+name = "datrie"
+version = "1.4.1"
+version_suffix_components = 1
+
+[package.metadata.capi.library.target.'cfg(target_os = "linux")']
+rustflags = "-Clink-arg=-Wl,--version-script=libdatrie.map"
+
+[package.metadata.capi.header]
+name = "trie.h"
+subdirectory = "datrie"
+emit_version_constants = false
+
+[package.metadata.capi.pkg_config]
+name = "datrie"
+filename = "datrie-0.2"
+description = "Double-array trie library"
+strip_include_path_components = 1
 
 [profile.release-debug]
 inherits = "release"

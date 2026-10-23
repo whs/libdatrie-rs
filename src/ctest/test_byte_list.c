@@ -81,7 +81,7 @@ validate_entry (const TrieIterator *iter)
     TrieData   data = trie_iterator_get_data (iter);
     int i;
 
-    for (i = 0; i < N_ELM (Source); i++) {
+    for (i = 0; i < (int) N_ELM (Source); i++) {
         if (alpha_char_strcmp (Source[i].key, key) == 0
             && Source[i].data == data)
         {
@@ -104,7 +104,7 @@ is_all_checked()
     int i;
     int ret = 1;
 
-    for (i = 0; i < N_ELM (Source); i++) {
+    for (i = 0; i < (int) N_ELM (Source); i++) {
         if (!Source[i].is_checked) {
             printf ("Not visited Source entry: ");
             dump_key_data (Source[i].key, Source[i].data);
@@ -145,7 +145,7 @@ c_test_byte_list (void)
     }
 
     msg_step ("Storing entries to test trie");
-    for (i = 0; i < N_ELM (Source); i++) {
+    for (i = 0; i < (int) N_ELM (Source); i++) {
         if (!trie_store (test_trie, Source[i].key, Source[i].data)) {
             printf ("Fail to store entry %d to test trie:\n", i);
             dump_key_data (Source[i].key, Source[i].data);

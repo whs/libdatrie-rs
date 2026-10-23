@@ -4,8 +4,6 @@ use alloc::vec::Vec;
 #[cfg(feature = "cffi")]
 use core::cmp::Ordering;
 use core::iter;
-#[cfg(feature = "cffi")]
-use core::slice;
 #[cfg(feature = "std")]
 use std::io;
 #[cfg(feature = "std")]
@@ -14,7 +12,7 @@ use std::io::{Read, Write};
 #[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 #[cfg(feature = "cffi")]
-use sentinel::{SSlice};
+use sentinel::SSlice;
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;

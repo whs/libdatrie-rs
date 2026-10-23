@@ -1,0 +1,25 @@
+language = "C"
+cpp_compat = true
+include_guard = "TRIE_H"
+include_version = true
+no_includes = true
+includes = ["stdint.h", "stdbool.h", "stdio.h"]
+
+after_includes = """
+typedef enum { DA_FALSE = 0, DA_TRUE = 1 } Bool;
+#ifndef FALSE
+# define FALSE DA_FALSE
+#endif
+#ifndef TRUE
+# define TRUE DA_TRUE
+#endif
+#define ALPHA_CHAR_ERROR   (~(AlphaChar)0)
+
+#define TRIE_CHAR_MAX     255
+
+#define   trie_state_is_terminal(s) trie_state_is_walkable((s),0)
+#define   trie_state_is_leaf(s) (trie_state_is_single(s) && trie_state_is_terminal(s))
+"""
+
+[export]
+rename = { "CTrie" = "Trie", "CTrieState" = "TrieState", "CTrieIterator" = "TrieIterator", "CTrieData" = "TrieData" }
