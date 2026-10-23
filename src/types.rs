@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 #[cfg(feature = "std")]
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 #[cfg(feature = "cffi")]
-use null_terminated::Nul;
+use sentinel::{SSlice};
 
 pub type TrieIndex = i32;
 pub const TRIE_INDEX_MAX: TrieIndex = 0x7fffffff;
@@ -61,21 +61,20 @@ impl AlphaCharToString for &[AlphaChar] {
 #[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn alpha_char_strlen(str: *const AlphaChar) -> i32 {
-    unsafe { Nul::new_unchecked(str) }.len() as i32
+    unsafe { SSlice::from_ptr(str) }.len() as i32
 }
 
 #[cfg(feature = "cffi")]
 /// Return an AlphaChar string as slice, including the null byte
 pub(crate) fn alpha_char_as_slice(str: *const AlphaChar) -> &'static [AlphaChar] {
-    let len = alpha_char_strlen(str) as usize + 1;
-    unsafe { slice::from_raw_parts(str, len) }
+    unsafe { SSlice::from_ptr(str) }.as_slice_with_sentinel()
 }
 
 #[cfg(feature = "cffi")]
 #[no_mangle]
 pub extern "C" fn alpha_char_strcmp(str1: *const AlphaChar, str2: *const AlphaChar) -> i32 {
-    let str1 = unsafe { Nul::new_unchecked(str1) };
-    let str2 = unsafe { Nul::new_unchecked(str2) };
+    let str1 = unsafe { SSlice::from_ptr(str1) };
+    let str2 = unsafe { SSlice::from_ptr(str2) };
     match str1.cmp(str2) {
         Ordering::Less => -1,
         Ordering::Equal => 0,
