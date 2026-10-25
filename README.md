@@ -20,14 +20,39 @@ Data types stored in Trie should implement the following traits:
 
 All these are supported out of the box for i32, Vec<u8> and `Option<T>` of any supporting types.
 
+## Building
+
+1. Install [cargo-c](https://github.com/lu-zero/cargo-c): `cargo install cargo-c`
+2. `cargo cbuild --release`
+3. `cargo cinstall --release` (check params on cargo-c docs for more details)
+
+cargo-c will generate trie.h and datrie-0.2.pc
+
+To build with Nix, run `nix build .#`
+
+## Development
+
+All tools are available in `nix develop`
+
+- To generate C headers: `cargo cbuild` which will put it in target/triplet/debug/trie.h
+- To run C test: `cargo ctest -F ctest`
+- To run fuzz testing
+  1. Install [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz): `cargo install cargo-fuzz`
+  2. `cd fuzz; cargo fuzz run fuzz_load`
+  3. The list of fuzz test names are in fuzz/fuzz_targets/
+- To regenerate formal verification specs:
+  1. Nix must be installed, with Nix flakes enabled. You could install these tools manually without Nix as well; the installation guide is out of scope for this readme.
+  2. `lean/charon.sh` which will generate datrie.llbc.
+  3. `aeneas -backend lean -dest lean -subdir /Datrie/Code -namespace Datrie -split-files -loops-to-rec datrie.llbc`
+
 ## Feature flags
 
 * std: Enable std. Disable for no_std support. Serialization is not available without std as this library make use of
   `std::io::Cursor` (default on)
-* cffi: Enable building of C binding (default on, require std)
+* capi: Enable building of C binding (default on, require std)
 * ctest: Enable running C compatibility tests. These are the test from original libdatrie copied almost verbatim
   to ensure that our trie.h is backwards compatible
-* bin: Enable building of trietool utility
+* bin: Enable building of `trietool` utility
 
 ## On speed
 
